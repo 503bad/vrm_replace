@@ -214,12 +214,15 @@ def ensure(force=False):
     # 6. Node
     if not shutil.which("node"):
         raise SystemExit("Node.js が見つかりません。https://nodejs.org/ から LTS を導入して PATH を通し、再実行してください")
+    npm = shutil.which("npm") or shutil.which("npm.cmd")   # Windows では npm.cmd（shell 無しでは名前解決されない）
+    if not npm:
+        raise SystemExit("npm が見つかりません。Node.js を入れ直してください（npm 同梱）")
     if not (ROOT / "render" / "node_modules" / "puppeteer").exists() or force:
         log("  npm install（three, three-vrm, puppeteer + Chrome 約 170MB）")
-        sh(["npm", "install", "--no-audit", "--no-fund"], cwd=ROOT / "render")
+        sh([npm, "install", "--no-audit", "--no-fund"], cwd=ROOT / "render")
 
     # 7. GPU 確認
-    sh(["node", "s4_threevrm.js", "--gpu-test"], cwd=ROOT / "render")
+    sh([shutil.which("node"), "s4_threevrm.js", "--gpu-test"], cwd=ROOT / "render")
 
 
 def main():
