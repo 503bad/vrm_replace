@@ -9,7 +9,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from common import ROOT, load_config, run, stage_python
+from common import ROOT, load_config, run, stage_python, write_options
 
 
 def main():
@@ -26,6 +26,12 @@ def main():
     ap.add_argument("--max-frames", type=int, default=0,
                     help="先頭 N フレームだけ処理する（確認用）")
     ap.add_argument("--work", default=None, help="作業ディレクトリを指定（省略時 work/<video名>）")
+    onoff = {"on": True, "off": False}
+    ap.add_argument("--joint-limits", choices=onoff, default=None,
+                    help="人間の可動域で関節をクランプする（既定は config.yaml）")
+    ap.add_argument("--hand-interpolate", choices=onoff, default=None,
+                    help="手が検出できない区間を前後の検出で補間する（既定は config.yaml）")
+    ap.add_argument("--fingers", choices=onoff, default=None, help="指トラッキング（既定は config.yaml）")
     args = ap.parse_args()
 
     cfg = load_config()
@@ -37,6 +43,13 @@ def main():
         sys.exit(f"vrm not found: {vrm}")
     work = Path(args.work).resolve() if args.work else (Path(cfg["work_dir"]) / video.stem).resolve()
     work.mkdir(parents=True, exist_ok=True)
+    opts = write_options(work, {
+        "joint_limits": onoff.get(args.joint_limits),
+        "hand_interpolate": onoff.get(args.hand_interpolate),
+        "use_fingers": onoff.get(args.fingers),
+    })
+    cfg = load_config(work)
+    print("options:", {k: cfg.get(k) for k in ("joint_limits", "hand_interpolate", "use_fingers")}, flush=True)
     py = stage_python()
     st = ROOT / "stages"
 

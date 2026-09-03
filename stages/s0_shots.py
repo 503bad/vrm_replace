@@ -29,7 +29,7 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--max-frames", type=int, default=0)
     a = ap.parse_args()
-    cfg = load_config()
+    cfg = load_config(a.work)
     work = Path(a.work)
     fps, w, h, n = probe(a.video)
     if a.max_frames > 0:

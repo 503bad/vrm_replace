@@ -27,7 +27,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--work", required=True)
     a = ap.parse_args()
-    cfg = load_config()
+    cfg = load_config(a.work)
     pp = Path(cfg["propainter_dir"])
     if not (pp / "inference_propainter.py").exists():
         raise SystemExit(f"ProPainter が見つかりません: {pp}  (git clone https://github.com/sczhou/ProPainter third_party/ProPainter)")

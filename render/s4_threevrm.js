@@ -97,7 +97,13 @@ async function main() {
 
   const shots = args.gpuTest ? [] : fs.readdirSync(args.work).filter((d) => /^shot_\d+$/.test(d)).sort()
     .filter((d) => !args.shot || d === args.shot)
-    .filter((d) => args.noSkip || !fs.existsSync(path.join(args.work, d, ".done_4")));
+    .filter((d) => {
+      if (args.noSkip) return true;
+      const doneF = path.join(args.work, d, ".done_4"), mocapF = path.join(args.work, d, "mocap.json");
+      if (!fs.existsSync(doneF)) return true;
+      // mocap.json が .done_4 より新しい（オプション変更で s2 をやり直した）なら再レンダー
+      return fs.existsSync(mocapF) && fs.statSync(mocapF).mtimeMs > fs.statSync(doneF).mtimeMs;
+    });
   if (!args.gpuTest && shots.length === 0) { console.log("  nothing to render"); return; }
 
   const firstMeta = args.gpuTest ? { width: 640, height: 360 } :

@@ -49,6 +49,21 @@
 - 限界: sample のように手が 40〜50px の素材では握りが浅め。手が大きく写る素材ほど良い。
   遮蔽側の手（sample の左手）は 60/356 フレームしか取れず、その間はレストの手
 
+### 可動域制限・手の補間・GUI（feature/finger-tracking, 2026-09-03）
+
+- `stages/joint_limits.py`: 親相対回転を「ボーン軸 d・正曲げ方向 e・持ち上げ方向 h=e×d」で swing/twist に分解し、
+  bend/side/twist をクランプして FK で戻す。子は親相対の角度を保つ。角度表は `LIMITS`（cv 座標 T ポーズ基準）。
+  単体テスト: 肘/膝の逆曲がり → −5°、手首 120° → 80°、上腕 twist 150° → 100° を確認
+- 注意: 前腕の twist 基準は肘の曲げ軸、手の twist 基準は掌法線なので、回内外が「前腕 twist」と「手 twist」に
+  任意に分かれる。手の twist は ±110° と広め。陸上素材ではクランプ前の手首 bend が −113〜133°、twist −145〜61° と
+  暴れていて（= パタつき）、クランプ + 補間で安定した
+- 手の補間 (`hand_interpolate`): `reject_hand_outliers` で直前採用フレームから (hand_outlier_deg × 経過フレーム) 以上
+  掌が飛ぶ検出を捨て、`fill_gaps` の上限を全長にして線形補間。OFF 時は従来（0.5 秒まで補間、以降レスト）
+- オプションは `work/<video>/options.json`（`common.write_options` / `load_config(work)`）。s2 は mocap.json に
+  `options` を記録し、変わっていれば .done_2 があってもやり直す。s4 は mocap.json が .done_4 より新しければ再レンダー
+- `gui.py`: tkinter のランチャー。run.py を子プロセスで起動しログ表示。停止は taskkill /T。設定は gui_settings.json
+- 残課題: MediaPipe の奥行き推定が甘く、肘を深く曲げる動き（走り）で肘が浅く出る。可動域では直らない
+
 ## 設計上の決定事項
 
 1. 工程は別プロセス。終了で VRAM 解放。16GB を各工程がフルに使ってよい

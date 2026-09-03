@@ -183,7 +183,7 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--auto", action="store_true")
     a = ap.parse_args()
-    cfg = load_config()
+    cfg = load_config(a.work)
 
     # 先にクリックを全部済ませる（GPU ロード待ちの間に UI が出ないように）
     todo = [sd for sd in shot_dirs(a.work) if not done(sd, 1)]

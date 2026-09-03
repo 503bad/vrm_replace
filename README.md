@@ -1,7 +1,8 @@
 # vrm_replace — 実写の人物を VRM キャラに置き換えるパイプライン（Windows ネイティブ）
 
 ```
-python run.py --video input.mp4 --vrm chara.vrm --out result.mp4
+python gui.py                                                    # GUI（動画・VRM・出力を選んでオプションを ON/OFF → 実行）
+python run.py --video input.mp4 --vrm chara.vrm --out result.mp4  # CLI
 ```
 
 1. 最初のショットの1フレーム目が表示されるので、置き換えたい人物を **左クリック → Enter**
@@ -24,6 +25,17 @@ python run.py --video input.mp4 --vrm chara.vrm --out result.mp4
 中間成果物はすべて `work/<video名>/shot_NNN/` に書き出される（`--work DIR` で変更可）。各工程の完了で `.done_N` を置き、再実行時はスキップ。
 `--from N` で N 以降をやり直し。`--no-cleanplate` で ProPainter を飛ばして元映像の上に重ねる（確認用、数分で終わる）。
 `--max-frames N` で先頭 N フレームだけ処理（確認用）。クリック UI は tkinter（OpenCV の GUI 有無に依存しない）。
+
+### GUI / CLI で切り替えられるオプション
+
+| GUI | CLI | 内容 |
+|---|---|---|
+| 関節を人間の可動域に制限する | `--joint-limits on/off` | 親相対の回転を swing/twist に分解し、肘・膝の逆曲がり、手首の折れ、上腕のねじれ等をクランプ（`stages/joint_limits.py`）。全バックエンド共通 |
+| 手が検出できない区間を前後の検出で補間する | `--hand-interpolate on/off` | 掌の向きが 1 フレームで大きく飛ぶ検出を外れ値として捨て、未検出区間は前後の検出を線形補間（端は最寄りを保持）。OFF だと 0.5 秒以上の欠損は VRM のレストの手 |
+| 指をトラッキングする | `--fingers on/off` | Hand Landmarker による指の推定 |
+
+これらは `work/<video>/options.json` に保存され、次回同じ動画を処理するときも引き継がれる。
+変更するとモーキャプ（工程 2）から自動でやり直す（`--from` の指定は不要）。
 
 ```
 work/<video>/shot_000/
@@ -89,6 +101,7 @@ python run.py --video sample/xxx.mp4 --vrm sample/xxx.vrm --out out/test.mp4 --n
 - `sam2_chunk_frames` SAM2 に一度に渡すフレーム数（RAM/VRAM）
 - `focal_scale`, `mocap_smooth_sigma`, `use_hands`, `crop_margin`
 - `use_fingers`, `hand_crop_scale`, `hand_min_crop_px`, `finger_smooth_sigma`, `finger_max_splay_deg`（指）
+- `joint_limits`, `hand_interpolate`, `hand_outlier_deg`（GUI / CLI で上書き可）。可動域の角度表は `stages/joint_limits.py: LIMITS`
 - `propainter_subvideo`, `propainter_neighbor`, `propainter_max_side`, `propainter_segment_frames`, `mask_dilate_px`
 - `person_hip_height`（auto / 数値[m]）, `arm_offset_deg`（SMPL 系のみ）, `render_warmup_frames`, ライト各種
 - `chrome_exe` GPU が効かない場合にインストール済み Chrome を指定 / `allow_software_gl`
@@ -98,6 +111,7 @@ python run.py --video sample/xxx.mp4 --vrm sample/xxx.vrm --out out/test.mp4 --n
 - 複数ショットがある場合、ショットごとにクリックを求める（`--auto` で最初の点を使い回し）
 - 人物がフレームアウトして再登場した場合、同一ショット内では追跡が切れる（マスク空 → その区間は透明）
 - 人物の遮蔽（手前に物が来る）は扱わない。影は消えない（マスクは人物のみ）
+- MediaPipe は奥行き方向の推定が甘く、走りのように肘を深く曲げて体の前に構える動きでは肘の曲げが浅く出る（可動域制限では直らない。SMPL 系バックエンドで改善する種類の問題）
 - 表情は未対応。指は MediaPipe Hand Landmarker で推定するが、手が小さく写る（〜50px）素材では握りが浅め・開き気味になる。
   `finger_max_splay_deg` / `finger_smooth_sigma` で抑制、`use_fingers: false` で無効化（VRM のレストの手のまま）
 - ライティングは平行光 1 灯 + 環境光。背景に合わせて `config.yaml` の `light_dir` 等を調整

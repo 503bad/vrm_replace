@@ -23,6 +23,10 @@ hand_crop_scale: 3.2         # 手のクロップ幅 = 手の大きさ × これ
 hand_min_crop_px: 256        # クロップをこれ以上に拡大してから推定（小さく写る手の精度向上）
 finger_smooth_sigma: 3.0     # 指の時間方向平滑化（フレーム）。手が小さく写るときは大きめ
 finger_max_splay_deg: 20     # 指（親指以外）の左右への開きの上限[deg]。0 で無効
+# ---- 以下 3 つは GUI / run.py の引数で上書きでき、work/<video>/options.json に保存される ----
+joint_limits: true           # 人間の可動域で関節をクランプ（stages/joint_limits.py）。全バックエンド共通
+hand_interpolate: true       # 手が検出できない区間を前後の検出で補間（false: 0.5 秒以上の欠損は VRM のレストの手）
+hand_outlier_deg: 45         # 掌の向きが 1 フレームでこれ以上飛ぶ検出は外れ値として捨てる[deg]
 crop_margin: 0.35            # マスク bbox に対するクロップの余白率
 # smpl_npz: 外部で作った SMPL 結果 (pose (F,22,3) axis-angle, transl (F,3), K (3,3)) を shot_NNN/mocap.npz に置く
 # gvhmr:    下のコマンドで GVHMR demo.py を実行し hmr4d_results.pt を読む。{video} {name} が置換される

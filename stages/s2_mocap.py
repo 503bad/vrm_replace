@@ -22,10 +22,12 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.spatial.transform import Rotation as R, Slerp
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from common import load_config, shot_dirs, done, mark_done, read_meta, frame_files, ffmpeg_exe  # noqa: E402
+from common import (load_config, shot_dirs, done, mark_done, read_meta, frame_files, ffmpeg_exe,  # noqa: E402
+                    option_snapshot)
 from mocap_common import (C, parents_for, rotation_between_frames, smooth_quats,  # noqa: E402
                           smpl_to_mocap, write_mocap, normalize, finger_bones, HAND_SEGMENTS,
                           FINGER_SUFFIXES)
+from joint_limits import apply_joint_limits  # noqa: E402
 
 # MediaPipe Hand Landmarker (21 点)
 H_WRIST, H_IDX_MCP, H_MID_MCP, H_PINKY_MCP = 0, 5, 9, 17
@@ -293,6 +295,24 @@ def hand_rotations(Ph, side, max_splay_deg=20.0):
     return out
 
 
+def reject_hand_outliers(hw, det, side, max_deg):
+    """掌の向きが直前の採用フレームから (max_deg × 経過フレーム) 以上飛んでいる検出を捨てる。
+    パタパタと向きが変わる誤検出を落とし、その区間は補間に任せる。15 フレーム以上採用が無ければ再アンカー。"""
+    if max_deg <= 0:
+        return det.copy()
+    keep = det.copy()
+    last_R, last_i = None, None
+    for i in np.where(det)[0]:
+        Rh = R.from_matrix(hand_rotations(hw[i], side)["leftHand" if side == 0 else "rightHand"])
+        if last_R is not None and (i - last_i) < 15:
+            ang = np.degrees((last_R.inv() * Rh).magnitude())
+            if ang > max_deg * (i - last_i):
+                keep[i] = False
+                continue
+        last_R, last_i = Rh, i
+    return keep
+
+
 def mediapipe_backend(sd, meta, cfg):
     W, H, fps = meta["width"], meta["height"], meta["fps"]
     K = default_K(W, H, float(cfg["focal_scale"]))
@@ -314,14 +334,20 @@ def mediapipe_backend(sd, meta, cfg):
     use_fingers = use_hands and bool(cfg.get("use_fingers", True)) and hand_det.any()
     hand_valid = np.zeros((F, 2), bool)
     if use_fingers:
+        interp = bool(cfg.get("hand_interpolate", True))
         for side in (0, 1):
-            if hand_det[:, side].any():
-                hw, hv = fill_gaps(hand_world[:, side], hand_det[:, side], max_gap // 2)
-                fsig = float(cfg.get("finger_smooth_sigma", sigma * 2))
-                if fsig > 0 and F > 2:
-                    hw = gaussian_filter1d(hw, fsig, axis=0, mode="nearest")
-                hand_world[:, side] = hw
-                hand_valid[:, side] = hv
+            if not hand_det[:, side].any():
+                continue
+            det = reject_hand_outliers(hand_world[:, side], hand_det[:, side], side,
+                                       float(cfg.get("hand_outlier_deg", 45)))
+            print(f"    hand {'LR'[side]}: outliers removed {int(hand_det[:, side].sum() - det.sum())}", flush=True)
+            # 補間 ON: どんなに長い欠損も前後の検出で線形補間（端は最寄りを保持）。OFF: 0.5 秒まで
+            hw, hv = fill_gaps(hand_world[:, side], det, F if interp else max_gap // 2)
+            fsig = float(cfg.get("finger_smooth_sigma", sigma * 2))
+            if fsig > 0 and F > 2:
+                hw = gaussian_filter1d(hw, fsig, axis=0, mode="nearest")
+            hand_world[:, side] = hw
+            hand_valid[:, side] = np.ones(F, bool) if interp else hv
 
     bones = ["hips", "spine", "chest", "neck", "head",
              "leftUpperArm", "leftLowerArm", "rightUpperArm", "rightLowerArm",
@@ -421,12 +447,20 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--backend", default=None)
     a = ap.parse_args()
-    cfg = load_config()
+    cfg = load_config(a.work)
     backend = a.backend or cfg["mocap_backend"]
+    snap = option_snapshot(cfg)
 
     for sd in shot_dirs(a.work):
         if done(sd, 2):
-            continue
+            # オプション（可動域制限・手の補間・指）が前回と違えばやり直す
+            try:
+                prev = json.loads((sd / "mocap.json").read_text(encoding="utf-8")).get("options")
+            except Exception:
+                prev = None
+            if prev == snap:
+                continue
+            print(f"  {sd.name}: options changed {prev} -> {snap}, redoing", flush=True)
         meta = read_meta(sd)
         print(f"  {sd.name}: {backend}", flush=True)
         if backend == "mediapipe":
@@ -437,6 +471,11 @@ def main():
             m = gvhmr_backend(sd, meta, cfg, Path(a.work).name)
         else:
             raise SystemExit(f"unknown backend: {backend}")
+        if cfg.get("joint_limits", True):
+            m["rot"], counts = apply_joint_limits(m["rot"], m["bones"], m["parents"])
+            hit = {b: int(c) for b, c in zip(m["bones"], counts) if c}
+            print(f"    joint limits: clamped frames per bone {hit}", flush=True)
+        m["options"] = snap
         n = meta["n_frames"]
         if m["n_frames"] != n:
             print(f"    warning: mocap frames {m['n_frames']} != video frames {n}; padding/trimming", flush=True)

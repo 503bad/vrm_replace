@@ -16,7 +16,7 @@ def main():
     ap.add_argument("--max-frames", type=int, default=0, help="各ショット先頭 N フレームだけ（デバッグ用）")
     ap.add_argument("--no-skip", action="store_true", help=".done_4 を無視して再レンダー")
     a = ap.parse_args()
-    cfg = load_config()
+    cfg = load_config(a.work)
     js = ROOT / "render" / "s4_threevrm.js"
     if not (ROOT / "render" / "node_modules").exists():
         raise SystemExit("render/node_modules がありません。`cd render && npm install` を実行してください")

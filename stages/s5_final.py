@@ -15,7 +15,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--no-cleanplate", action="store_true")
     a = ap.parse_args()
-    cfg = load_config()
+    cfg = load_config(a.work)
     work = Path(a.work)
     ff = ffmpeg_exe()
 
