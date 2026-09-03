@@ -1,6 +1,7 @@
 @echo off
-rem vrm_replace GUI ランチャー。ダブルクリックで gui.py を起動する（コンソール窓は出さない）
-rem 優先順: py ランチャー (pyw -3) → PATH の pythonw → PATH の python
+rem vrm_replace GUI launcher. Double-click to start gui.py without a console window.
+rem Order: py launcher (pyw -3) -> pythonw on PATH -> python on PATH
+rem (ASCII only: cmd.exe parses this file with the system code page)
 cd /d "%~dp0"
 where pyw >nul 2>&1
 if %errorlevel%==0 (
@@ -17,5 +18,5 @@ if %errorlevel%==0 (
     start "" python gui.py
     goto :eof
 )
-echo Python が見つかりません。https://www.python.org/ から Python 3.12 を入れて PATH を通してください。
+echo Python not found. Install Python 3.12 from https://www.python.org/ and add it to PATH.
 pause
