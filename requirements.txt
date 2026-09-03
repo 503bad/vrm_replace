@@ -1,0 +1,18 @@
+# Windows native / Python 3.12. torch は別途 cu128 版を導入済みであること:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+numpy
+opencv-python
+pyyaml
+tqdm
+pillow
+imageio
+imageio-ffmpeg
+scenedetect
+mediapipe
+# SAM 2 (Windows: CUDA 拡張なしで動く)
+hydra-core
+iopath
+# ProPainter
+einops
+scipy
+av

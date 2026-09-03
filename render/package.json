@@ -1,0 +1,15 @@
+{
+  "name": "vrm-replace-render",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "three-vrm + Puppeteer headless GPU renderer for vrm_replace (stage 4)",
+  "scripts": {
+    "gputest": "node s4_threevrm.js --gpu-test"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.5.5",
+    "puppeteer": "^25.9.0",
+    "three": "^0.185.1"
+  }
+}

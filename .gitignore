@@ -1,0 +1,10 @@
+work/
+models/
+third_party/
+render/node_modules/
+logs/
+__pycache__/
+*.pyc
+*.zip
+out/
+sample/

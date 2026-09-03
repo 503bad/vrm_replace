@@ -1,0 +1,44 @@
+# ---- パス（相対パスはプロジェクトルート基準） ----
+work_dir: work
+sam2_ckpt: models/sam2/sam2.1_hiera_base_plus.pt
+sam2_cfg: configs/sam2.1/sam2.1_hiera_b+.yaml      # sam2 パッケージ内の相対パス
+mediapipe_model: models/mediapipe/pose_landmarker_heavy.task
+propainter_dir: third_party/ProPainter
+
+# ---- 0 ショット分割 ----
+scene_threshold: 27          # PySceneDetect の感度。カット検出が多すぎるなら上げる
+min_shot_frames: 8           # これより短いショットは前のショットに吸収
+
+# ---- 1 マスク（SAM2） ----
+sam2_chunk_frames: 300       # 一度に SAM2 へ渡すフレーム数（RAM/VRAM 対策。長尺はチャンクで繋ぐ）
+
+# ---- 2 モーキャプ ----
+mocap_backend: mediapipe     # mediapipe | smpl_npz | gvhmr
+focal_scale: 1.0             # fx = fy = focal_scale * max(width,height)。望遠なら大きく
+mocap_smooth_sigma: 1.5      # 時間方向ガウス平滑化（フレーム）。0 で無効
+use_hands: true              # 手首の向きも推定する（ノイズが気になれば false）
+crop_margin: 0.35            # マスク bbox に対するクロップの余白率
+# smpl_npz: 外部で作った SMPL 結果 (pose (F,22,3) axis-angle, transl (F,3), K (3,3)) を shot_NNN/mocap.npz に置く
+# gvhmr:    下のコマンドで GVHMR demo.py を実行し hmr4d_results.pt を読む。{video} {name} が置換される
+gvhmr_cmd: ""                # 例: wsl -d Ubuntu bash -lc "cd ~/GVHMR && conda run -n gvhmr python tools/demo/demo.py --video {video} -s"
+gvhmr_result: ""             # 例: \\wsl$\Ubuntu\home\you\GVHMR\outputs\demo\{name}\hmr4d_results.pt
+
+# ---- 3 クリーンプレート（ProPainter） ----
+mask_dilate_px: 12           # クリーンプレート用にマスクを太らせる
+propainter_subvideo: 30      # 一度に扱うフレーム数。VRAM 不足なら減らす
+propainter_neighbor: 10
+propainter_max_side: 960     # 長辺をこれ以下に縮めて処理（インペイント領域だけ貼り戻すので背景全体はぼけない）
+propainter_segment_frames: 300  # この長さごとに分割して実行（全フレームを GPU/RAM に持つため）
+
+# ---- 4 レンダー（three-vrm / Puppeteer） ----
+person_hip_height: auto      # VRM の腰の高さをこれ[m]に合わせてスケール。auto = 実写人物の脚長から推定（mediapipe）。SMPL 系なら 0.93
+arm_offset_deg: 0.0          # SMPL 系バックエンドで腕が上がりすぎ/下がりすぎなら ±5〜15
+render_warmup_frames: 45     # スプリングボーン安定化のための空回しフレーム数
+light_dir: [0.4, 1.0, 0.8]   # three.js 座標（x右 y上 z手前=カメラ側）でのライト位置方向
+light_intensity: 1.6
+ambient_intensity: 0.9
+chrome_exe: ""               # 空なら Puppeteer 同梱の Chrome。GPU が効かない時はインストール済み Chrome のパスを指定
+allow_software_gl: false     # true にすると SwiftShader（CPU）でも続行する
+
+# ---- 5 合成 ----
+crf: 18
