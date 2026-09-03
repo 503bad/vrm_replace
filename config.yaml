@@ -3,6 +3,7 @@ work_dir: work
 sam2_ckpt: models/sam2/sam2.1_hiera_base_plus.pt
 sam2_cfg: configs/sam2.1/sam2.1_hiera_b+.yaml      # sam2 パッケージ内の相対パス
 mediapipe_model: models/mediapipe/pose_landmarker_heavy.task
+mediapipe_hand_model: models/mediapipe/hand_landmarker.task
 propainter_dir: third_party/ProPainter
 
 # ---- 0 ショット分割 ----
@@ -17,6 +18,11 @@ mocap_backend: mediapipe     # mediapipe | smpl_npz | gvhmr
 focal_scale: 1.0             # fx = fy = focal_scale * max(width,height)。望遠なら大きく
 mocap_smooth_sigma: 1.5      # 時間方向ガウス平滑化（フレーム）。0 で無効
 use_hands: true              # 手首の向きも推定する（ノイズが気になれば false）
+use_fingers: true            # 指も推定する（Hand Landmarker を手首まわりのクロップに適用）
+hand_crop_scale: 3.2         # 手のクロップ幅 = 手の大きさ × これ
+hand_min_crop_px: 256        # クロップをこれ以上に拡大してから推定（小さく写る手の精度向上）
+finger_smooth_sigma: 3.0     # 指の時間方向平滑化（フレーム）。手が小さく写るときは大きめ
+finger_max_splay_deg: 20     # 指（親指以外）の左右への開きの上限[deg]。0 で無効
 crop_margin: 0.35            # マスク bbox に対するクロップの余白率
 # smpl_npz: 外部で作った SMPL 結果 (pose (F,22,3) axis-angle, transl (F,3), K (3,3)) を shot_NNN/mocap.npz に置く
 # gvhmr:    下のコマンドで GVHMR demo.py を実行し hmr4d_results.pt を読む。{video} {name} が置換される

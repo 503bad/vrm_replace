@@ -32,6 +32,33 @@ HUMANOID_PARENT = {
     "leftToes": "leftFoot", "rightUpperLeg": "hips", "rightLowerLeg": "rightUpperLeg",
     "rightFoot": "rightLowerLeg", "rightToes": "rightFoot",
 }
+# 指（VRM 1.0 名。0.x の thumbProximal/Intermediate は three-vrm が 1.0 名に読み替える）
+FINGER_SUFFIXES = ["ThumbMetacarpal", "ThumbProximal", "ThumbDistal"] + [
+    f"{fn}{seg}" for fn in ("Index", "Middle", "Ring", "Little") for seg in ("Proximal", "Intermediate", "Distal")]
+for _side in ("left", "right"):
+    HUMANOID_PARENT[f"{_side}ThumbMetacarpal"] = f"{_side}Hand"
+    HUMANOID_PARENT[f"{_side}ThumbProximal"] = f"{_side}ThumbMetacarpal"
+    HUMANOID_PARENT[f"{_side}ThumbDistal"] = f"{_side}ThumbProximal"
+    for _fn in ("Index", "Middle", "Ring", "Little"):
+        HUMANOID_PARENT[f"{_side}{_fn}Proximal"] = f"{_side}Hand"
+        HUMANOID_PARENT[f"{_side}{_fn}Intermediate"] = f"{_side}{_fn}Proximal"
+        HUMANOID_PARENT[f"{_side}{_fn}Distal"] = f"{_side}{_fn}Intermediate"
+
+
+def finger_bones(side):
+    return [f"{side}{s}" for s in FINGER_SUFFIXES]
+
+
+# MediaPipe Hand Landmarker (21 点) の (始点, 終点) インデックス
+HAND_SEGMENTS = {
+    "ThumbMetacarpal": (1, 2), "ThumbProximal": (2, 3), "ThumbDistal": (3, 4),
+    "IndexProximal": (5, 6), "IndexIntermediate": (6, 7), "IndexDistal": (7, 8),
+    "MiddleProximal": (9, 10), "MiddleIntermediate": (10, 11), "MiddleDistal": (11, 12),
+    "RingProximal": (13, 14), "RingIntermediate": (14, 15), "RingDistal": (15, 16),
+    "LittleProximal": (17, 18), "LittleIntermediate": (18, 19), "LittleDistal": (19, 20),
+}
+# 指の「基準姿勢」は全セグメントが手の方向（左 +x / 右 -x）にまっすぐ伸びた状態とする。
+# VRM ごとの実際のレスト方向（親指の角度・指の開き）との差は s4 側で補正する（renderer.js: restCorr）
 
 # OpenCV カメラ座標 ↔ SMPL/three 系 (y 上, z 手前) の変換。C = C⁻¹
 C = np.diag([1.0, -1.0, -1.0])

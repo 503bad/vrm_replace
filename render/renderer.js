@@ -96,6 +96,35 @@ function setScale(hipHeight) {
   return scale;
 }
 
+const FINGER_RE = /^(left|right)(Thumb|Index|Middle|Ring|Little)(Metacarpal|Proximal|Intermediate|Distal)$/;
+
+function fingerInfo(name) {
+  const m = FINGER_RE.exec(name);
+  return m ? { side: m[1] === "left" ? 0 : 1, finger: m[2], seg: m[3] } : null;
+}
+
+/** VRM 正規化リグでの指ボーンのレスト方向（three ワールド系, 単位ベクトル）。末節は親の方向を使う */
+function fingerRestDir(vrm, name, info) {
+  const H = vrm.humanoid;
+  const node = H.getNormalizedBoneNode(name);
+  const dirTo = (child) => {
+    const c = H.getNormalizedBoneNode(child);
+    if (!c || c.parent !== node) return null;
+    const v = c.position.clone();
+    return v.lengthSq() > 1e-10 ? v.normalize().applyQuaternion(vrm.scene.quaternion) : null;
+  };
+  const side = info.side === 0 ? "left" : "right";
+  let cands = [];
+  if (info.seg === "Metacarpal") cands = ["Proximal"];
+  else if (info.seg === "Proximal") cands = info.finger === "Thumb" ? ["Distal"] : ["Intermediate", "Distal"];
+  else if (info.seg === "Intermediate") cands = ["Distal"];
+  for (const c of cands) { const d = dirTo(`${side}${info.finger}${c}`); if (d) return d; }
+  // 末節（子が無い）: 親ボーン → 自分 の方向
+  const p = node.parent;
+  if (p && node.position.lengthSq() > 1e-10) return node.position.clone().normalize().applyQuaternion(vrm.scene.quaternion);
+  return null;
+}
+
 /** K (3x3, px) から OpenGL 射影行列。主点ずれも反映 */
 function projectionFromK(K, w, h, near, far) {
   const fx = K[0][0], fy = K[1][1], cx = K[0][2], cy = K[1][2];
@@ -130,7 +159,16 @@ window.loadShot = async ({ mocapUrl, width, height, warmup }) => {
     if (!node) continue;
     let p = mocap.parents[j];
     while (p >= 0 && !vrm.humanoid.getNormalizedBoneNode(mocap.bones[p])) p = mocap.parents[p];
-    used.push({ j, name, node, parent: p });
+    used.push({ j, name, node, parent: p, finger: fingerInfo(name) });
+  }
+  // 指: mocap の基準は「手の方向にまっすぐ」なので、VRM の実際のレスト方向（親指の角度・指の開き）との差を
+  // 補正する。W_vrm = W_can · Rc⁻¹（Rc: 基準方向 → VRM レスト方向の最小回転）
+  for (const u of used) {
+    if (!u.finger) continue;
+    const restDir = fingerRestDir(vrm, u.name, u.finger);
+    if (!restDir) { u.finger = null; continue; }
+    const dCan = new THREE.Vector3(u.finger.side === 0 ? 1 : -1, 0, 0);
+    u.restCorr = new THREE.Quaternion().setFromUnitVectors(dCan, restDir).invert();
   }
   S.used = used;
   S.W = mocap.bones.map(() => new THREE.Quaternion());
@@ -158,7 +196,12 @@ function applyPose(f) {
     const r = rot[j];
     W[j].set(r[0], -r[1], -r[2], r[3]).normalize();   // cv → three
   }
+  const fv = mocap.fingers_valid ? mocap.fingers_valid[f] : null;
   for (const u of used) {
+    if (u.finger) {
+      if (!fv || !fv[u.finger.side]) { u.node.quaternion.identity(); continue; }   // データ無し: VRM のレストのまま
+      if (u.restCorr) W[u.j].multiply(u.restCorr);
+    }
     if (u.parent < 0) {
       u.node.quaternion.copy(S.sceneQuatInv).multiply(W[u.j]);
     } else {

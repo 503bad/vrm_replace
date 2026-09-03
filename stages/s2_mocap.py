@@ -10,6 +10,7 @@ backend:
 """
 import argparse
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -23,7 +24,11 @@ from scipy.spatial.transform import Rotation as R, Slerp
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common import load_config, shot_dirs, done, mark_done, read_meta, frame_files, ffmpeg_exe  # noqa: E402
 from mocap_common import (C, parents_for, rotation_between_frames, smooth_quats,  # noqa: E402
-                          smpl_to_mocap, write_mocap, normalize)
+                          smpl_to_mocap, write_mocap, normalize, finger_bones, HAND_SEGMENTS,
+                          FINGER_SUFFIXES)
+
+# MediaPipe Hand Landmarker (21 点)
+H_WRIST, H_IDX_MCP, H_MID_MCP, H_PINKY_MCP = 0, 5, 9, 17
 
 # ---------------------------------------------------------------- MediaPipe
 # 33 landmarks
@@ -64,6 +69,16 @@ def run_mediapipe(sd, meta, cfg):
         min_pose_detection_confidence=0.4, min_pose_presence_confidence=0.4,
         output_segmentation_masks=False)
     landmarker = vision.PoseLandmarker.create_from_options(opts)
+    use_fingers = bool(cfg.get("use_hands", True)) and bool(cfg.get("use_fingers", True))
+    hand_lm = None
+    if use_fingers:
+        hopts = vision.HandLandmarkerOptions(
+            base_options=mp_python.BaseOptions(model_asset_path=cfg["mediapipe_hand_model"]),
+            running_mode=vision.RunningMode.IMAGE, num_hands=2,
+            min_hand_detection_confidence=0.3, min_hand_presence_confidence=0.3)
+        hand_lm = vision.HandLandmarker.create_from_options(hopts)
+    hand_scale = float(cfg.get("hand_crop_scale", 3.2))
+    hand_min = int(cfg.get("hand_min_crop_px", 256))
 
     frames = frame_files(sd)
     F = len(frames)
@@ -72,8 +87,39 @@ def run_mediapipe(sd, meta, cfg):
     world_lm = np.full((F, 33, 3), np.nan, np.float32)
     vis = np.zeros((F, 33), np.float32)
     detected = np.zeros(F, bool)
+    hand_world = np.full((F, 2, 21, 3), np.nan, np.float32)   # [:, 0]=左手 [:, 1]=右手
+    hand_det = np.zeros((F, 2), bool)
     margin = float(cfg["crop_margin"])
     prev_box = None
+
+    def detect_hand(img, side, pose_px, pose_vis):
+        """pose の手首まわりを正方形クロップして Hand Landmarker。world landmarks (21,3) or None"""
+        wri, idx, pky, thb = ((L_WRI, L_INDEX, L_PINKY, 21) if side == 0 else (R_WRI, R_INDEX, R_PINKY, 22))
+        if pose_vis[wri] < 0.5:
+            return None
+        pw = pose_px[wri]
+        size = max(np.linalg.norm(pose_px[i] - pw) for i in (idx, pky, thb)) * hand_scale
+        size = float(max(size, 48))
+        c = (pw + pose_px[idx] + pose_px[pky]) / 3
+        x0, y0 = int(max(0, c[0] - size / 2)), int(max(0, c[1] - size / 2))
+        x1, y1 = int(min(W, c[0] + size / 2)), int(min(H, c[1] + size / 2))
+        cw, ch = x1 - x0, y1 - y0
+        if cw < 16 or ch < 16:
+            return None
+        crop = cv2.cvtColor(img[y0:y1, x0:x1], cv2.COLOR_BGR2RGB)
+        up = max(1.0, hand_min / max(cw, ch))
+        if up > 1.0:
+            crop = cv2.resize(crop, (int(cw * up), int(ch * up)), interpolation=cv2.INTER_CUBIC)
+        res = hand_lm.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(crop)))
+        best, best_d = None, 0.35 * size
+        for lms, wl in zip(res.hand_landmarks, res.hand_world_landmarks):
+            hw = np.array([x0 + lms[H_WRIST].x * cw, y0 + lms[H_WRIST].y * ch])
+            d = np.linalg.norm(hw - pw)
+            if d < best_d:
+                best, best_d = wl, d
+        if best is None:
+            return None
+        return np.array([[l.x, l.y, l.z] for l in best], np.float32)
 
     for i, fp in enumerate(frames):
         m = cv2.imread(str(sd / "mask" / f"{i:06d}.png"), 0)
@@ -112,10 +158,19 @@ def run_mediapipe(sd, meta, cfg):
         world_lm[i] = [[l.x, l.y, l.z] for l in wl]
         vis[i] = [l.visibility for l in lms]
         detected[i] = True
+        if hand_lm is not None:
+            for side in (0, 1):
+                hw = detect_hand(img, side, img_lm[i], vis[i])
+                if hw is not None:
+                    hand_world[i, side] = hw
+                    hand_det[i, side] = True
         if i % 50 == 0:
             print(f"    frame {i}/{F}", flush=True)
     landmarker.close()
-    return img_lm, world_lm, vis, detected
+    if hand_lm is not None:
+        hand_lm.close()
+        print(f"    hands detected: L {int(hand_det[:, 0].sum())}/{F}  R {int(hand_det[:, 1].sum())}/{F}", flush=True)
+    return img_lm, world_lm, vis, detected, hand_world, hand_det
 
 
 def fill_gaps(arr, detected, max_gap):
@@ -212,10 +267,36 @@ def bone_rotations(P, use_hands):
     return Rb
 
 
+def hand_rotations(Ph, side, max_splay_deg=20.0):
+    """Ph: (21,3) Hand Landmarker の world landmarks（カメラ整列, m）。
+    手と指 15 本のグローバル回転（基準 = 手の方向にまっすぐ伸びた指）を返す。
+    親指以外は左右への開き（小指側軸 s 方向の成分）を ±max_splay_deg にクランプしてノイズを抑える。"""
+    pre = "left" if side == 0 else "right"
+    d_can = LEFT if side == 0 else -LEFT
+    n_can = np.array([0, -1.0, 0]) if side == 0 else np.array([0, 1.0, 0])   # 基準の掌法線（左右で符号が逆）
+    s_can = np.cross(n_can, d_can)                                             # 小指側（両手とも +z）
+    d_palm = Ph[H_MID_MCP] - Ph[H_WRIST]
+    n = np.cross(Ph[H_IDX_MCP] - Ph[H_WRIST], Ph[H_PINKY_MCP] - Ph[H_WRIST])
+    s = np.cross(n, d_palm)
+    s_hat = normalize(s - np.dot(s, normalize(d_palm)) * normalize(d_palm))
+    lim = math.radians(max_splay_deg)
+    out = {pre + "Hand": rotation_between_frames(d_can, s_can, d_palm, s)}
+    for suf, (a, b) in HAND_SEGMENTS.items():
+        d = Ph[b] - Ph[a]
+        if not suf.startswith("Thumb") and max_splay_deg > 0:
+            comp = float(np.dot(d, s_hat))
+            perp = d - comp * s_hat
+            ang = math.atan2(comp, np.linalg.norm(perp) + 1e-9)
+            if abs(ang) > lim:
+                d = normalize(perp) * math.cos(lim) + s_hat * math.sin(lim) * np.sign(ang)
+        out[pre + suf] = rotation_between_frames(d_can, s_can, d, s)
+    return out
+
+
 def mediapipe_backend(sd, meta, cfg):
     W, H, fps = meta["width"], meta["height"], meta["fps"]
     K = default_K(W, H, float(cfg["focal_scale"]))
-    img_lm, world_lm, vis, detected = run_mediapipe(sd, meta, cfg)
+    img_lm, world_lm, vis, detected, hand_world, hand_det = run_mediapipe(sd, meta, cfg)
     F = len(detected)
     print(f"    detected {int(detected.sum())}/{F} frames", flush=True)
     if detected.sum() == 0:
@@ -229,17 +310,37 @@ def mediapipe_backend(sd, meta, cfg):
         img_lm = gaussian_filter1d(img_lm, sigma, axis=0, mode="nearest")
         world_lm = gaussian_filter1d(world_lm, sigma, axis=0, mode="nearest")
 
+    use_hands = bool(cfg.get("use_hands", True))
+    use_fingers = use_hands and bool(cfg.get("use_fingers", True)) and hand_det.any()
+    hand_valid = np.zeros((F, 2), bool)
+    if use_fingers:
+        for side in (0, 1):
+            if hand_det[:, side].any():
+                hw, hv = fill_gaps(hand_world[:, side], hand_det[:, side], max_gap // 2)
+                fsig = float(cfg.get("finger_smooth_sigma", sigma * 2))
+                if fsig > 0 and F > 2:
+                    hw = gaussian_filter1d(hw, fsig, axis=0, mode="nearest")
+                hand_world[:, side] = hw
+                hand_valid[:, side] = hv
+
     bones = ["hips", "spine", "chest", "neck", "head",
              "leftUpperArm", "leftLowerArm", "rightUpperArm", "rightLowerArm",
              "leftUpperLeg", "leftLowerLeg", "leftFoot", "rightUpperLeg", "rightLowerLeg", "rightFoot"]
-    if cfg.get("use_hands", True):
+    if use_hands:
         bones += ["leftHand", "rightHand"]
+    if use_fingers:
+        bones += finger_bones("left") + finger_bones("right")
     rot = np.zeros((F, len(bones), 4), np.float32)
+    rot[:, :, 3] = 1.0
     hips = np.zeros((F, 3), np.float32)
     for f in range(F):
         P = world_lm[f]
-        Rb = bone_rotations(P, cfg.get("use_hands", True))
-        rot[f] = R.from_matrix(np.stack([Rb[b] for b in bones])).as_quat()
+        Rb = bone_rotations(P, use_hands)
+        if use_fingers:
+            for side in (0, 1):
+                if hand_valid[f, side]:
+                    Rb.update(hand_rotations(hand_world[f, side], side, float(cfg.get("finger_max_splay_deg", 20.0))))
+        rot[f] = R.from_matrix(np.stack([Rb[b] if b in Rb else np.eye(3) for b in bones])).as_quat()
         # world landmark の原点は腰中心。腰中心のカメラ座標を再投影で解く
         t = solve_translation(P[REPROJ_IDX], img_lm[f][REPROJ_IDX], vis[f][REPROJ_IDX], K)
         t[2] = float(np.clip(t[2], 0.3, 100.0))
@@ -247,6 +348,7 @@ def mediapipe_backend(sd, meta, cfg):
     rot = smooth_quats(rot, sigma)
     if sigma > 0 and F > 2:
         hips = gaussian_filter1d(hips, sigma, axis=0, mode="nearest")
+    np.save(sd / "pose2d.npy", img_lm)   # (F,33,2) 画素座標。デバッグ・可視化用
     # この人物の腰の高さ（脚長 + 足首高さ）。VRM をこれに合わせてスケールすると足元が合う
     det = world_lm[detected]
     leg = np.zeros(len(det))
@@ -258,6 +360,8 @@ def mediapipe_backend(sd, meta, cfg):
         "backend": "mediapipe", "fps": fps, "width": W, "height": H, "n_frames": F,
         "K": K.tolist(), "bones": bones, "parents": parents_for(bones),
         "rot": rot, "hips": hips, "valid": valid.tolist(), "hip_height": hip_height,
+        # 指データの有無（[左, 右]）。無いフレームは s4 が VRM のレスト（自然な手）のままにする
+        "fingers_valid": hand_valid.tolist(),
     }
 
 

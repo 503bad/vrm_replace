@@ -15,7 +15,7 @@ def load_config():
     with open(ROOT / "config.yaml", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     # 相対パスはプロジェクトルート基準に解決
-    for k in ("sam2_ckpt", "propainter_dir", "mediapipe_model", "work_dir"):
+    for k in ("sam2_ckpt", "propainter_dir", "mediapipe_model", "mediapipe_hand_model", "work_dir"):
         if k in cfg and cfg[k] and not Path(cfg[k]).is_absolute():
             cfg[k] = str((ROOT / cfg[k]).resolve())
     return cfg

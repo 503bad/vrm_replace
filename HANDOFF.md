@@ -34,6 +34,20 @@
   （`smpl_params_incam`, `K_fullimg`）は旧 HANDOFF の記載どおりに実装、未検証
 - SMPL 系の `transl` → hips 位置の変換で pelvis オフセット `SMPL_J0` を定数近似している（betas 依存を無視）
 
+### 指トラッキング（feature/finger-tracking, 2026-09-03）
+
+- s2 mediapipe バックエンドに Hand Landmarker を追加。pose の手首・指先から手のクロップ（`hand_crop_scale`）を作り、
+  `hand_min_crop_px` 以上に拡大して推定。pose の手首に最も近い検出を採用（左右は pose 側で決めるので handedness 不要）
+- Hand の world landmarks も pose と同じカメラ整列座標（実データで xy の向きが画像と一致することを確認）
+- 回転: 掌の基準フレーム (d_palm = wrist→middle_mcp, n = (idx_mcp-wrist)×(pinky_mcp-wrist), s = n×d_palm) を使い、
+  各セグメント方向 d_seg と s から `rotation_between_frames`。基準（canonical）は全指が手の方向 ±x にまっすぐ
+- **VRM ごとのレスト差の補正は s4**（`renderer.js: fingerRestDir / restCorr`）。正規化リグの子ノード位置からレスト方向
+  d_vrm を取り、Rc = (±x → d_vrm) の最小回転で `W_vrm = W_can · Rc⁻¹`。末節（子無し）は親の方向を流用
+- ノイズ対策: 親指以外の外転を `finger_max_splay_deg`(20°) でクランプ、指は `finger_smooth_sigma`(3) で強めに平滑化
+- `tools/render_selftest.py` の f0003 で「両手を握る」合成ポーズを検証済み（掌側に曲がる）
+- 限界: sample のように手が 40〜50px の素材では握りが浅め。手が大きく写る素材ほど良い。
+  遮蔽側の手（sample の左手）は 60/356 フレームしか取れず、その間はレストの手
+
 ## 設計上の決定事項
 
 1. 工程は別プロセス。終了で VRAM 解放。16GB を各工程がフルに使ってよい
@@ -65,7 +79,7 @@
 
 1. **GVHMR / WHAM 等の SMPL 系推定器を実機で繋ぐ**（品質が最も上がる）。`smpl_npz` バックエンドで
    `mocap.npz` を置くだけで s4 以降は動くので、推定器側の環境は自由（WSL2 でも別 conda でも）
-2. 手指: HaMeR 等の結果を mocap.json のボーン（leftIndexProximal…）に追加すれば s4 は自動で拾う
+2. 手指の精度: HaMeR 等の結果を mocap.json の指ボーンに入れれば s4 はそのまま拾う（restCorr も効く）
 3. 影: マスクに影を含める（クリックで影も指定）か、s5 でキャラの接地影を合成
 4. 遮蔽: s5 で「元マスクの外側に残る手前物体」を戻す仕組み
 5. 複数人の同時置換: obj_id を増やして s1〜s4 を人物ごとに回す
