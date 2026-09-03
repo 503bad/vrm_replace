@@ -16,6 +16,8 @@
 - s4 は Blender 版から **three-vrm + Puppeteer（ヘッドレス Chrome, ANGLE D3D11 で GPU）** に差し替え済み。
   720p で約 160 fps。スプリングボーン動作（sample VRM で 14 ジョイント検出）
 - ffmpeg は PATH に無ければ imageio-ffmpeg 同梱バイナリを使う
+- 旧 Blender 版 s4 は削除した（bpy 依存のため GPL 扱いになり得る・未検証・揺れもの非対応）。必要なら git 履歴 `a724ee5` 以前の `legacy/s4_blender.py`
+- 配布: `run.cmd` → `setup_env.py`（環境チェック・依存/モデル取得・`.setup_done` で高速化）→ `gui.py`。ライセンスは Apache-2.0、依存は THIRD_PARTY_NOTICES.md
 
 ### 検証済み
 

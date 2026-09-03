@@ -9,3 +9,4 @@ __pycache__/
 out/
 sample/
 gui_settings.json
+.setup_done

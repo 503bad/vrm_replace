@@ -1,4 +1,4 @@
-# Windows native / Python 3.12. torch は別途 cu128 版を導入済みであること:
+# Windows / Python 3.10+. torch (CUDA 12.8 版) は setup_env.py が別途導入する:
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 numpy
 opencv-python
