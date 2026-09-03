@@ -1,9 +1,10 @@
 @echo off
 rem vrm_replace GUI ランチャー。ダブルクリックで gui.py を起動する（コンソール窓は出さない）
+rem 優先順: py ランチャー (pyw -3) → PATH の pythonw → PATH の python
 cd /d "%~dp0"
-set "PYW=%LOCALAPPDATA%\Programs\Python\Python312\pythonw.exe"
-if exist "%PYW%" (
-    start "" "%PYW%" gui.py
+where pyw >nul 2>&1
+if %errorlevel%==0 (
+    start "" pyw -3 gui.py
     goto :eof
 )
 where pythonw >nul 2>&1

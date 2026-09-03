@@ -1,0 +1,8 @@
+# 改行コードを環境によらず固定する（Windows の core.autocrlf 設定に左右されない）
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.vrm binary
+*.mp4 binary
+*.png binary
+*.jpg binary
