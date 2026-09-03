@@ -5,7 +5,7 @@
 *Replace a person in a video with a VRM avatar: click the person once, get an mp4. Windows + NVIDIA GPU. Pipeline: SAM 2 (mask) → MediaPipe (body + finger mocap) → ProPainter (clean plate) → three-vrm in headless Chrome (render, spring bones) → ffmpeg (composite).*
 
 ```
-git clone <このリポジトリ>
+git clone https://github.com/503bad/vrm_replace.git
 cd vrm_replace
 run.cmd      ← ダブルクリックでも可
 ```
