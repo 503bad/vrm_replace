@@ -30,6 +30,7 @@ class App(tk.Tk):
         super().__init__()
         self.title("vrm_replace")
         self.proc = None
+        self._line = ""
         self.q = queue.Queue()
         s = dict(DEFAULTS)
         if SETTINGS.exists():
@@ -101,15 +102,23 @@ class App(tk.Tk):
         sb.grid(row=5, column=3, sticky="ns", pady=(8, 0))
         self.log["yscrollcommand"] = sb.set
 
+    def _initdir(self, var):
+        cur = var.get()
+        if cur and Path(cur).parent.exists():
+            return str(Path(cur).parent)
+        return str(ROOT / "sample") if (ROOT / "sample").exists() else str(ROOT)
+
     def _pick(self, var, types):
-        p = filedialog.askopenfilename(filetypes=types)
+        p = filedialog.askopenfilename(filetypes=types, initialdir=self._initdir(var))
         if p:
             var.set(p)
             if var is self.v_video and not self.v_out.get():
                 self.v_out.set(str(ROOT / "out" / (Path(p).stem + "_vrm.mp4")))
 
     def _pick_out(self):
-        p = filedialog.asksaveasfilename(defaultextension=".mp4", filetypes=[("mp4", "*.mp4")])
+        (ROOT / "out").mkdir(exist_ok=True)
+        p = filedialog.asksaveasfilename(defaultextension=".mp4", filetypes=[("mp4", "*.mp4")],
+                                         initialdir=self._initdir(self.v_out) if self.v_out.get() else str(ROOT / "out"))
         if p:
             self.v_out.set(p)
 
@@ -144,16 +153,21 @@ class App(tk.Tk):
         self.log.delete("1.0", "end")
         self._append("$ " + " ".join(cmd) + "\n")
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
-        self.proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                     text=True, encoding="utf-8", errors="replace", env=env, bufsize=1)
+        self.proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         threading.Thread(target=self._reader, daemon=True).start()
         self.btn_run["state"] = "disabled"
         self.btn_stop["state"] = "normal"
         self.status["text"] = "実行中..."
 
     def _reader(self):
-        for line in self.proc.stdout:
-            self.q.put(line)
+        import codecs
+        dec = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        while True:
+            chunk = self.proc.stdout.read1(4096) if hasattr(self.proc.stdout, "read1") else self.proc.stdout.read(4096)
+            if not chunk:
+                break
+            self.q.put(dec.decode(chunk))
         self.q.put(None)
 
     def _poll(self):
@@ -174,7 +188,26 @@ class App(tk.Tk):
         self.after(100, self._poll)
 
     def _append(self, text):
-        self.log.insert("end", text)
+        """\r で行頭に戻る出力（tqdm の進捗バー）は現在行を上書きする。「== 」で始まる行は工程名としてステータスに出す"""
+        buf = text.replace("\r\n", "\n")
+        i = 0
+        while i < len(buf):
+            j_n, j_r = buf.find("\n", i), buf.find("\r", i)
+            cand = [k for k in (j_n, j_r) if k >= 0]
+            j = min(cand) if cand else len(buf)
+            seg = buf[i:j]
+            if seg:
+                self.log.insert("end", seg)
+                self._line += seg
+            if j < len(buf) and buf[j] == "\n":
+                if self._line.startswith("== "):
+                    self.status["text"] = self._line.strip()
+                self.log.insert("end", "\n")
+                self._line = ""
+            elif j < len(buf) and buf[j] == "\r":
+                self.log.delete("end-1c linestart", "end-1c")
+                self._line = ""
+            i = j + 1
         self.log.see("end")
 
     def _stop(self):
@@ -191,5 +224,19 @@ class App(tk.Tk):
         self.destroy()
 
 
+def main():
+    try:
+        App().mainloop()
+    except Exception:
+        import traceback
+        (ROOT / "logs").mkdir(exist_ok=True)
+        (ROOT / "logs" / "gui_error.log").write_text(traceback.format_exc(), encoding="utf-8")
+        try:
+            messagebox.showerror("vrm_replace", traceback.format_exc())
+        except Exception:
+            pass
+        raise
+
+
 if __name__ == "__main__":
-    App().mainloop()
+    main()

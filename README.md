@@ -1,9 +1,13 @@
 # vrm_replace — 実写の人物を VRM キャラに置き換えるパイプライン（Windows ネイティブ）
 
 ```
-python gui.py                                                    # GUI（動画・VRM・出力を選んでオプションを ON/OFF → 実行）
+run.cmd をダブルクリック                                          # GUI 起動（動画・VRM・出力を「参照...」で選び、オプションを ON/OFF → 実行）
+python gui.py                                                    # 同上（コマンドから）
 python run.py --video input.mp4 --vrm chara.vrm --out result.mp4  # CLI
 ```
+
+GUI では進捗ログが画面下に流れ、SAM2 / ProPainter のプログレスバーもその場で更新される。上部のステータスに現在の工程が出る。
+「停止」で途中終了しても、同じ設定で「実行」すれば済んだ工程は飛ばして続きから進む。
 
 1. 最初のショットの1フレーム目が表示されるので、置き換えたい人物を **左クリック → Enter**
    （右クリックで「除外したい場所」も指定可。`r` でやり直し）
