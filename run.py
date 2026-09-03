@@ -50,7 +50,7 @@ def main():
     })
     cfg = load_config(work)
     print("options:", {k: cfg.get(k) for k in ("joint_limits", "hand_interpolate", "use_fingers")}, flush=True)
-    py = stage_python()
+    py = [stage_python(), "-u"]   # -u: 工程の出力を GUI にすぐ流す
     st = ROOT / "stages"
 
     if args.from_stage > 0:
@@ -59,26 +59,26 @@ def main():
                 f.unlink()
 
     print("== 0 shots", flush=True)
-    run([py, st / "s0_shots.py", "--video", video, "--work", work,
+    run(py + [st / "s0_shots.py", "--video", video, "--work", work,
          "--max-frames", args.max_frames])
 
     print("== 1 mask (SAM2)", flush=True)
-    run([py, st / "s1_mask.py", "--work", work] + (["--auto"] if args.auto else []))
+    run(py + [st / "s1_mask.py", "--work", work] + (["--auto"] if args.auto else []))
 
     print(f"== 2 mocap ({cfg['mocap_backend']})", flush=True)
-    run([py, st / "s2_mocap.py", "--work", work])
+    run(py + [st / "s2_mocap.py", "--work", work])
 
     if args.no_cleanplate:
         print("== 3 cleanplate: skipped (--no-cleanplate)", flush=True)
     else:
         print("== 3 cleanplate (ProPainter)", flush=True)
-        run([py, st / "s3_cleanplate.py", "--work", work])
+        run(py + [st / "s3_cleanplate.py", "--work", work])
 
     print("== 4 render (three-vrm)", flush=True)
-    run([py, st / "s4_render.py", "--work", work, "--vrm", vrm])
+    run(py + [st / "s4_render.py", "--work", work, "--vrm", vrm])
 
     print("== 5 composite", flush=True)
-    run([py, st / "s5_final.py", "--work", work, "--video", video,
+    run(py + [st / "s5_final.py", "--work", work, "--video", video,
          "--out", Path(args.out).resolve()] + (["--no-cleanplate"] if args.no_cleanplate else []))
     print("done:", args.out)
 

@@ -25,6 +25,17 @@ DEFAULTS = {
 }
 
 
+def console_python():
+    """run.py を動かす Python。GUI が pythonw.exe で起動されていても、工程の子プロセスに標準出力を
+    正しく継承させるためコンソール版 python.exe を使う（ウィンドウは CREATE_NO_WINDOW で出さない）。"""
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe":
+        cand = exe.with_name("python.exe")
+        if cand.exists():
+            return str(cand)
+    return sys.executable
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -139,7 +150,7 @@ class App(tk.Tk):
             messagebox.showerror("vrm_replace", "出力先を指定してください"); return
         SETTINGS.write_text(json.dumps(s, ensure_ascii=False, indent=2), encoding="utf-8")
         onoff = lambda b: "on" if b else "off"  # noqa: E731
-        cmd = [sys.executable, "-u", str(ROOT / "run.py"), "--video", s["video"], "--vrm", s["vrm"], "--out", s["out"],
+        cmd = [console_python(), "-u", str(ROOT / "run.py"), "--video", s["video"], "--vrm", s["vrm"], "--out", s["out"],
                "--joint-limits", onoff(s["joint_limits"]), "--hand-interpolate", onoff(s["hand_interpolate"]),
                "--fingers", onoff(s["fingers"])]
         if not s["cleanplate"]:

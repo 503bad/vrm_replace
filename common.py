@@ -102,4 +102,11 @@ def frame_files(shot_dir):
 
 
 def stage_python():
+    """各工程を動かす Python。pythonw.exe（GUI 用、標準出力を持たない）で呼ばれた場合は
+    同じディレクトリの python.exe に置き換える。そうしないと工程の出力・エラーが失われる。"""
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe":
+        cand = exe.with_name("python.exe")
+        if cand.exists():
+            return str(cand)
     return sys.executable
