@@ -8,7 +8,7 @@
  * ボーン:
  *   three-vrm の正規化ボーン（getNormalizedBoneNode）はレスト時のワールド回転が identity なので、
  *   各ボーンの local = inv(W_parent) · W_bone（parent = mocap と VRM の両方に存在する最も近い祖先）。
- *   hips は vrm.scene の回転（VRM0.x は rotateVRM0 で 180° 回る）を打ち消してから入れる。
+ *   VRM0.x は rotateVRM0 で vrm.scene が Y 軸 180° 回るので、全ボーンをその回転で共役してから入れる（applyPose）。
  */
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -76,6 +76,7 @@ window.initRenderer = async ({ vrmUrl, hipHeight, lightDir, lightIntensity, ambi
   S.hipsAboveLeg = hipsWorld.y - legTop;   // 骨盤中心が股関節よりどれだけ上か（VRM 単位）
   S.hipHeightArg = hipHeight;
   const scale = setScale(typeof hipHeight === "number" ? hipHeight : 0.93);
+  S.sceneQuat = vrm.scene.quaternion.clone();
   S.sceneQuatInv = vrm.scene.quaternion.clone().invert();
   S.hipsRestLocal = hipsNode.position.clone();
 
@@ -172,6 +173,7 @@ window.loadShot = async ({ mocapUrl, width, height, warmup }) => {
   }
   S.used = used;
   S.W = mocap.bones.map(() => new THREE.Quaternion());
+  S.G = mocap.bones.map(() => new THREE.Quaternion());
 
   vrm.humanoid.resetNormalizedPose();
   const first = mocap.valid.findIndex((v) => v);
@@ -189,8 +191,15 @@ const _q = new THREE.Quaternion();
 const _v = new THREE.Vector3();
 const _off = new THREE.Vector3();
 
+/**
+ * W（three ワールド系、T ポーズ基準のグローバル回転）→ 正規化ボーンのローカル回転。
+ * 正規化ボーンはレスト時に vrm.scene に対して回転 identity なので、ワールドでのレスト姿勢は scene の回転 Q
+ * （VRM 1.0 は identity、0.x は rotateVRM0 による Y 軸 180°）。ワールドで W だけ回したボーンの scene 内での回転は
+ *   G = Q⁻¹ · W · Q
+ * で、ローカル回転は inv(G_parent) · G（ルートは G）。0.x ではこれが四元数の x, z の符号反転になる。
+ */
 function applyPose(f) {
-  const { mocap, used, W, vrm } = S;
+  const { mocap, used, W, G, vrm } = S;
   const rot = mocap.rot[f];
   for (let j = 0; j < mocap.bones.length; j++) {
     const r = rot[j];
@@ -198,14 +207,16 @@ function applyPose(f) {
   }
   const fv = mocap.fingers_valid ? mocap.fingers_valid[f] : null;
   for (const u of used) {
-    if (u.finger) {
-      if (!fv || !fv[u.finger.side]) { u.node.quaternion.identity(); continue; }   // データ無し: VRM のレストのまま
-      if (u.restCorr) W[u.j].multiply(u.restCorr);
-    }
+    u.skip = !!(u.finger && (!fv || !fv[u.finger.side]));   // 指のデータ無し: VRM のレストのまま
+    if (u.finger && !u.skip && u.restCorr) W[u.j].multiply(u.restCorr);
+  }
+  for (let j = 0; j < W.length; j++) G[j].copy(S.sceneQuatInv).multiply(W[j]).multiply(S.sceneQuat);
+  for (const u of used) {
+    if (u.skip) { u.node.quaternion.identity(); continue; }
     if (u.parent < 0) {
-      u.node.quaternion.copy(S.sceneQuatInv).multiply(W[u.j]);
+      u.node.quaternion.copy(G[u.j]);
     } else {
-      u.node.quaternion.copy(W[u.parent]).invert().multiply(W[u.j]);
+      u.node.quaternion.copy(G[u.parent]).invert().multiply(G[u.j]);
     }
   }
   const hips = vrm.humanoid.getNormalizedBoneNode("hips");

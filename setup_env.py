@@ -8,11 +8,11 @@
 導入するもの（すべてプロジェクト内 or pip）:
   1. PyTorch (CUDA 12.8 版)              pip。無い場合のみ。約 3GB のダウンロード
   2. requirements.txt                    pip
-  3. SAM 2                               third_party/sam2 に取得（git があれば clone、無ければ zip）→ pip install
-  4. ProPainter                          third_party/ProPainter に取得（同上）
-  5. モデル（再配布不可のため各自で取得） models/ と third_party/ProPainter/weights/ にダウンロード
-  6. Node 依存 (three, three-vrm, puppeteer + Chrome)  render/ で npm install
-  7. ヘッドレス Chrome の GPU 確認
+  3. モデル（各配布元から直接取得）      models/ にダウンロード: MediaPipe（pose heavy / full, hand）
+  4. Node 依存 (three, three-vrm, puppeteer + Chrome)  render/ で npm install
+  5. ヘッドレス Chrome の GPU 確認
+
+AI モデルは「学習データ非公開かつ商用可」または「学習データも重みも商用可」のものだけ（THIRD_PARTY_NOTICES.md）。
 """
 import argparse
 import hashlib
@@ -22,38 +22,25 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import urllib.request
-import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-TP = ROOT / "third_party"
 LOGS = ROOT / "logs"
 STAMP = ROOT / ".setup_done"
 
 TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
-REPOS = {
-    "sam2": ("https://github.com/facebookresearch/sam2.git",
-             "https://github.com/facebookresearch/sam2/archive/refs/heads/main.zip"),
-    "ProPainter": ("https://github.com/sczhou/ProPainter.git",
-                   "https://github.com/sczhou/ProPainter/archive/refs/heads/main.zip"),
-}
 MODELS = {
-    "models/sam2/sam2.1_hiera_base_plus.pt":
-        "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_base_plus.pt",
     "models/mediapipe/pose_landmarker_heavy.task":
         "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task",
     "models/mediapipe/hand_landmarker.task":
         "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task",
-    "third_party/ProPainter/weights/ProPainter.pth":
-        "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/ProPainter.pth",
-    "third_party/ProPainter/weights/recurrent_flow_completion.pth":
-        "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/recurrent_flow_completion.pth",
-    "third_party/ProPainter/weights/raft-things.pth":
-        "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/raft-things.pth",
+    # 速度優先プリセット用
+    "models/mediapipe/pose_landmarker_full.task":
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task",
+    # クリーンプレート（工程 3）はモデル不要: フロー = NVIDIA Optical Flow（ドライバー同梱）、穴埋め = OpenCV
 }
-PY_MODULES = ("cv2", "scenedetect", "mediapipe", "sam2", "imageio_ffmpeg", "scipy", "einops", "yaml", "PIL", "av")
+PY_MODULES = ("cv2", "scenedetect", "mediapipe", "imageio_ffmpeg", "scipy", "yaml", "PIL", "webview")
 
 
 # ------------------------------------------------------------------ util
@@ -111,25 +98,6 @@ def download(url, dst):
     tmp.replace(dst)
 
 
-def fetch_repo(name):
-    """third_party/<name> を用意する。git があれば clone、無ければ zip を展開"""
-    dst = TP / name
-    if dst.exists():
-        return
-    TP.mkdir(exist_ok=True)
-    git_url, zip_url = REPOS[name]
-    if shutil.which("git"):
-        sh(["git", "clone", "--depth", "1", git_url, dst])
-        return
-    with tempfile.TemporaryDirectory(dir=TP) as td:
-        z = Path(td) / f"{name}.zip"
-        download(zip_url, z)
-        with zipfile.ZipFile(z) as zf:
-            zf.extractall(td)
-        inner = next(p for p in Path(td).iterdir() if p.is_dir())
-        shutil.move(str(inner), str(dst))
-
-
 def stamp_hash():
     h = hashlib.sha256()
     for f in (ROOT / "requirements.txt", ROOT / "render" / "package.json", Path(__file__)):
@@ -139,6 +107,14 @@ def stamp_hash():
 
 
 # ------------------------------------------------------------------ steps
+def opencv_contrib_ok():
+    try:
+        import cv2
+        return hasattr(getattr(cv2, "xphoto", None), "inpaint")
+    except Exception:
+        return False
+
+
 def check(verbose=True):
     """状態を表示し、全部そろっていれば True"""
     ok = True
@@ -162,7 +138,11 @@ def check(verbose=True):
         item(f"python module: {m}", have(m))
     for rel in MODELS:
         item(rel, (ROOT / rel).exists())
-    item("third_party/ProPainter", (TP / "ProPainter" / "inference_propainter.py").exists())
+    # 警告のみ（無くても Telea で動く）。opencv-python と opencv-contrib-python が両方あると上書きし合い、contrib が消える
+    if verbose and not opencv_contrib_ok():
+        log("  [!!] OpenCV contrib（cv2.xphoto.inpaint）が無効です。クリーンプレートの穴埋めが Telea（にじみやすい）になります")
+        log("       直し方: python -m pip uninstall -y opencv-python opencv-python-headless && "
+            "python -m pip install --force-reinstall --no-deps opencv-contrib-python")
     item(f"node ({shutil.which('node') or 'not found'})", shutil.which("node"), "Node.js LTS を https://nodejs.org/ から導入")
     item("render/node_modules", (ROOT / "render" / "node_modules" / "puppeteer").exists())
     item("nvidia-smi（GPU ドライバ）", shutil.which("nvidia-smi"), "NVIDIA GPU とドライバが必要")
@@ -187,31 +167,27 @@ def ensure(force=False):
     except Exception:
         log("  torch が無いので CUDA 12.8 版を導入します（約 3GB のダウンロード。時間がかかります）")
     if not torch_ok or force:
-        sh([py, "-m", "pip", "install", "--upgrade", "torch", "torchvision", "--index-url", TORCH_INDEX])
+        sh([py, "-m", "pip", "install", "--upgrade", "torch", "--index-url", TORCH_INDEX])
 
     # 2. requirements
-    missing = [m for m in PY_MODULES if m != "sam2" and not have(m)]
+    missing = [m for m in PY_MODULES if not have(m)]
     if missing or force:
         log(f"  pip: requirements.txt を導入（不足: {missing or 'none'}）")
         sh([py, "-m", "pip", "install", "-r", ROOT / "requirements.txt"])
+    # scenedetect などが opencv-python を引き込むと contrib 版（穴埋めの ShiftMap）が上書きされて消えるので入れ直す
+    if not opencv_contrib_ok():
+        log("  OpenCV: opencv-python / -headless が contrib 版を上書きしているので、contrib 版を入れ直します")
+        sh([py, "-m", "pip", "uninstall", "-y", "opencv-python", "opencv-python-headless"])
+        sh([py, "-m", "pip", "install", "--force-reinstall", "--no-deps", "opencv-contrib-python"])
 
-    # 3. SAM 2
-    fetch_repo("sam2")
-    if not have("sam2") or force:
-        # CUDA 拡張は不要（後処理のみ）。ビルドツール無しで入る
-        sh([py, "-m", "pip", "install", TP / "sam2"], env={"SAM2_BUILD_CUDA": "0"})
-
-    # 4. ProPainter
-    fetch_repo("ProPainter")
-
-    # 5. モデル
+    # 3. モデル
     for rel, url in MODELS.items():
         p = ROOT / rel
         if p.exists() and not force:
             continue
         download(url, p)
 
-    # 6. Node
+    # 4. Node
     if not shutil.which("node"):
         raise SystemExit("Node.js が見つかりません。https://nodejs.org/ から LTS を導入して PATH を通し、再実行してください")
     npm = shutil.which("npm") or shutil.which("npm.cmd")   # Windows では npm.cmd（shell 無しでは名前解決されない）
@@ -221,7 +197,7 @@ def ensure(force=False):
         log("  npm install（three, three-vrm, puppeteer + Chrome 約 170MB）")
         sh([npm, "install", "--no-audit", "--no-fund"], cwd=ROOT / "render")
 
-    # 7. GPU 確認
+    # 5. GPU 確認
     sh([shutil.which("node"), "s4_threevrm.js", "--gpu-test"], cwd=ROOT / "render")
 
 

@@ -1,17 +1,34 @@
 # ---- パス（相対パスはプロジェクトルート基準） ----
 work_dir: work
-sam2_ckpt: models/sam2/sam2.1_hiera_base_plus.pt
-sam2_cfg: configs/sam2.1/sam2.1_hiera_b+.yaml      # sam2 パッケージ内の相対パス
-mediapipe_model: models/mediapipe/pose_landmarker_heavy.task
 mediapipe_hand_model: models/mediapipe/hand_landmarker.task
-propainter_dir: third_party/ProPainter
+
+# ---- 処理モード（GUI / run.py --preset で選べ、work/<video>/options.json に保存される） ----
+#   quality: 品質優先（通常レベル）  speed: 速度優先（軽量）
+# presets の各値は、同じキーをこのファイルの上位に書くとそちらが優先される（例: 上に mediapipe_model: ... を書く）
+preset: quality
+presets:
+  quality:
+    mediapipe_model: models/mediapipe/pose_landmarker_heavy.task
+    cleanplate_max_side: 960       # 長辺をこれ以下に縮めて処理（補完した領域だけ元解像度に貼り戻す）
+    cleanplate_flow_perf: slow     # オプティカルフローの精度 slow（高精度）| fast
+    cleanplate_flow_grid: 1        # NVIDIA Optical Flow の出力の細かさ（1 = 画素ごと、4 = 4x4 ごと）
+    cleanplate_bidirectional: true # 前後両方向から背景を運ぶ（false: 過去からのみ）
+  speed:
+    mediapipe_model: models/mediapipe/pose_landmarker_full.task
+    cleanplate_max_side: 720
+    cleanplate_flow_perf: fast
+    cleanplate_flow_grid: 4
+    cleanplate_bidirectional: false
 
 # ---- 0 ショット分割 ----
 scene_threshold: 27          # PySceneDetect の感度。カット検出が多すぎるなら上げる
 min_shot_frames: 8           # これより短いショットは前のショットに吸収
 
-# ---- 1 マスク（SAM2） ----
-sam2_chunk_frames: 300       # 一度に SAM2 へ渡すフレーム数（RAM/VRAM 対策。長尺はチャンクで繋ぐ）
+# ---- 1 マスク（MediaPipe Pose の人物マスク。モデルは上の mediapipe_model） ----
+mask_threshold: 0.5          # 人物らしさがこれ以上の画素をマスクにする
+mask_temporal_smooth: 0.3    # 前フレームのマスクとならす割合（輪郭のちらつき対策。0 で無効）
+mask_hold_frames: 8          # 人物を一時的に見失ったとき、直前のマスクでつなぐフレーム数
+mask_num_poses: 4            # 一度に検出する人数（対象以外の人物と区別するため）
 
 # ---- 2 モーキャプ ----
 mocap_backend: mediapipe     # mediapipe | smpl_npz | gvhmr
@@ -33,12 +50,16 @@ crop_margin: 0.35            # マスク bbox に対するクロップの余白�
 gvhmr_cmd: ""                # 例: wsl -d Ubuntu bash -lc "cd ~/GVHMR && conda run -n gvhmr python tools/demo/demo.py --video {video} -s"
 gvhmr_result: ""             # 例: \\wsl$\Ubuntu\home\you\GVHMR\outputs\demo\{name}\hmr4d_results.pt
 
-# ---- 3 クリーンプレート（ProPainter） ----
+# ---- 3 クリーンプレート（オプティカルフロー + OpenCV の穴埋め）。工程 4（レンダー）の後に実行する ----
+# 他フレームに映っている背景をフローで運んで埋め、どこにも映っていない部分だけ OpenCV で埋める（学習データを使わない従来手法）
 mask_dilate_px: 12           # クリーンプレート用にマスクを太らせる
-propainter_subvideo: 30      # 一度に扱うフレーム数。VRAM 不足なら減らす
-propainter_neighbor: 10
-propainter_max_side: 960     # 長辺をこれ以下に縮めて処理（インペイント領域だけ貼り戻すので背景全体はぼけない）
-propainter_segment_frames: 300  # この長さごとに分割して実行（全フレームを GPU/RAM に持つため）
+cleanplate_segment_frames: 300  # この長さごとに分割して処理（区間のフレームを GPU に持つため）
+cleanplate_avatar_band: true # 補完する領域を「人物マスク − アバターの不透明部分」に限定（VRM を変えると作り直し）
+cleanplate_band_margin_px: 6 # アバターの縁から内側にこれだけは補完する（元解像度の px）
+cleanplate_key_interval: 15  # 運べない穴が残ったとき、穴埋めするキーフレームの最小間隔（以降のフレームへ運ぶ）
+cleanplate_fill: shiftmap    # shiftmap: 周囲の模様をずらして貼る（大きな穴向き、要 opencv-contrib）| telea: 滑らかに伸ばす（速い、にじむ）
+cleanplate_fill_min_px: 64   # これより小さい穴は常に telea（処理解像度の px）
+cleanplate_flow_batch: 4     # 一度にまとめて求めるフレーム対の数
 
 # ---- 4 レンダー（three-vrm / Puppeteer） ----
 person_hip_height: auto      # VRM の腰の高さをこれ[m]に合わせてスケール。auto = 実写人物の脚長から推定（mediapipe）。SMPL 系なら 0.93

@@ -32,7 +32,6 @@
   実際にクリック UI が 2 回出る流れと `--auto` は未確認
 - **長尺**（数十分）。設計上は s1 チャンク / s3 セグメント / ショット単位再開で耐えるはずだが未実測。
   ディスク: frames jpg で 30 分 ≒ 5GB、cleanplate png で ≒ 50GB 程度を見込む
-- **VRM 0.x** の読み込み（three-vrm が対応、`rotateVRM0` で 180° 回転して同じ数学に乗る設計だが実機未確認）
 - **GVHMR バックエンド**（`s2_mocap.py: gvhmr_backend`）。`hmr4d_results.pt` のキー名
   （`smpl_params_incam`, `K_fullimg`）は旧 HANDOFF の記載どおりに実装、未検証
 - SMPL 系の `transl` → hips 位置の変換で pelvis オフセット `SMPL_J0` を定数近似している（betas 依存を無視）
@@ -63,8 +62,79 @@
   掌が飛ぶ検出を捨て、`fill_gaps` の上限を全長にして線形補間。OFF 時は従来（0.5 秒まで補間、以降レスト）
 - オプションは `work/<video>/options.json`（`common.write_options` / `load_config(work)`）。s2 は mocap.json に
   `options` を記録し、変わっていれば .done_2 があってもやり直す。s4 は mocap.json が .done_4 より新しければ再レンダー
-- `gui.py`: tkinter のランチャー。run.py を子プロセスで起動しログ表示。停止は taskkill /T。設定は gui_settings.json
+- `gui.py`: 当初は tkinter のランチャー（2026-11-04 に pywebview へ置き換え。下の「GUI の作り直し」）
 - 残課題: MediaPipe の奥行き推定が甘く、肘を深く曲げる動き（走り）で肘が浅く出る。可動域では直らない
+
+### ProPainter の置き換え・処理モード（feature/biz_fix, 2026-11-04）
+
+検討の経緯は `docs/update_20261104.md`。
+- ProPainter（非商用）を、**torchvision RAFT（BSD-3）+ LaMa（Apache-2.0, IOPaint の TorchScript 版 big-lama.pt）** に置き換えた
+  - SEA-RAFT ではなく torchvision の RAFT にした。追加の依存やリポジトリの取得が要らず、重みも download.pytorch.org から取れるため
+  - 各画素の「元の画素（フレーム番号, x, y）」を座標のまま運ぶので、運ぶ回数が増えてもぼけない。人物の上のフローは
+    1/4 に縮小して Telea で補間する。どこにも映っていない穴は、キーフレーム（`cleanplate_lama_interval`）で
+    人物の穴全体を LaMa で埋めてから運ぶ。双方向のときは、実際に映った背景を LaMa の結果より優先する
+- **工程の順番を 4 → 3 に変えた**。埋めるのは「太らせた人物マスク − アバターの不透明部分（縁から 6px 内側まで）」だけ。
+  歩行素材では人物マスクの 62% だけを埋めればよい。s3 は `.done_4` が `.done_3` より新しければ作り直す
+- **プリセット** `preset: quality | speed`（`config.yaml: presets`）。品質優先 = 通常レベル（以前と同じ設定）、速度優先 = 軽量化
+  （SAM2 small, MediaPipe Pose full, 長辺 720, RAFT small ×8, 過去からのみ）。GUI のラジオボタン / `run.py --preset`
+- **設定の変更検知**: `.done_N` に工程の結果に効く設定（`common.STAGE_KEYS`）を JSON で記録。run.py が今の設定と比べて、
+  違えばその工程から作り直す。s3 の区間単位の途中結果は `cleanplate/_sig.txt` で同じ設定のものだけ使い回す
+- 終了時の異常終了: LaMa の TorchScript を CUDA で使った後、プロセス終了時の後片付けで 0xC0000409 / 127 で落ちることがある。
+  `torch._C._jit_set_profiling_executor(False)` を使うと起きやすかったので外し、代わりに入力を 64 の倍数にそろえて
+  再最適化を減らした。さらに s3 は最後に `os._exit(0)` で終わる（モデルを持ったまま後片付けを飛ばす）
+- 実測と残課題:
+  - 品質優先 0.25 秒/フレーム・VRAM 4.8GB、速度優先 0.05 秒/フレーム・1.9GB（別の重い処理と並行して測った値）
+  - 速度優先は人物の通った跡ににじみが出やすい。前後両方向にしても改善は小さく、時間は 3 割増えたので過去からのみにした
+  - SAM2 が白い靴を取りこぼすことがあり、その部分はクリーンプレートに残る（工程 1 の課題）
+  - 区間（300 フレーム）の境目で埋め方が変わる。継ぎ目のちらつきは未評価
+  - LaMa と RAFT の学習データの条件は THIRD_PARTY_NOTICES.md に注記した。商用で使う前に法務の確認が必要
+
+### VRM 0.x 対応の修正（feature/biz_fix, 2026-11-04）
+
+- 0.x で手足の回転が逆になり、体も後ろを向いていた。原因: 0.x は `rotateVRM0` で vrm.scene が Y 軸 180° 回るが、
+  補正していたのは hips だけで、子ボーンの親相対回転はワールド系のまま入れていた
+- `renderer.js: applyPose` で、全ボーンのグローバル回転を scene の回転 Q で共役（G = Q⁻¹·W·Q）してから親相対にする。
+  1.0 は Q = identity なので結果は変わらない。0.x では四元数の x, z の符号反転と同じ（three-vrm 公式サンプルと同じ扱い）
+- 確認: `tools/render_selftest.py` を 1.0 と 0.x の両方で実行し、T ポーズ / 右向き / 左腕上げが期待どおり。
+  歩行素材でも 1.0・0.x とも腕を自然に振って進行方向を向く
+- テスト用 VRM は `docs/` に置いてある（1.0 と 0.x を 1 体ずつ）。VRM は git 管理外。権利のある VRM だけを使うこと
+
+### GUI の作り直し（feature/biz_fix, 2026-11-04）
+
+- tkinter → **pywebview（WebView2）+ HTML/CSS/JS**。画面 `app/ui`、処理 `app/backend.py`（js_api）、ファイル情報 `app/media.py`
+- 見た目は emo_alp（`plugin/ui/Theme.h`）の言語に合わせた：地色 #0F1114・インク #E9E7E1・アンバー 1 色、赤は警告だけ、
+  角丸・枠なしの平行四辺形と面取り、等幅大文字＋字間のラベル、数字は Bahnschrift、snap / expo の動き。フォントは同梱しない
+- ドラッグ＆ドロップ: Python 側で `window.dom.document.events.drop` を受け、`pywebviewFullPath` でフルパスを得る
+  （ブラウザの D&D ではパスが取れず、動画を丸ごとコピーすることになるため）。拡張子で動画 / VRM に振り分ける
+- 人物のクリックは GUI の中で行う: `run.py --until 0`（ショット分割だけ）→ select.json が無いショットの最初のフレームを
+  画面に出す → クリックを select.json に書く → run.py 本体。「2 ショット目以降も同じ位置」は GUI 側で全ショットに書く。
+  「やり直す工程 = 1」のときは select.json を消してクリックからやり直す。CLI だけで使う場合は従来どおり s1 の tkinter 画面
+- 進み具合はログの行から読む（`app/backend.py: RE_PROG`）。工程の出力の書式を変えたらここも合わせる
+- VRM のメタ情報（0.x: `extensions.VRM.meta`、1.0: `extensions.VRMC_vrm.meta`）から利用条件を表示する。止めはしない
+- 確認: 処理側は Api を直接呼んで 準備→選択→実行→完了 を通した。画面はヘッドレス Chrome で状態ごとに撮影。
+  実機のドロップ操作は未確認（自動では試せない）
+
+### 商用利用の基準の厳格化（feature/biz_fix, 2026-11-04）
+
+- 方針: AI モデルは「学習データを公開していない、かつ商用可」または「学習データも学習済みモデルも商用可」のものだけを使う
+- 一次情報で確認した結果:
+  - 満たす: MediaPipe Pose / Hand / Selfie・Multiclass Segmentation（モデルの説明書に Apache-2.0、学習データは同意を得た撮影画像で非公開）
+  - 満たさない: SAM 2（SA-1B が研究用）、RAFT（FlyingChairs ほかが研究用）、LaMa（Places が研究・教育用）、Mitsua Diffusion CC0（文章の処理部分と VAE が SD 2.1 由来）
+  - 候補: TAPIR（重みは Apache-2.0、学習は Kubric MOVi-E のみ。素材は GSO = CC BY 4.0 と Poly Haven = CC0。
+    生成されたデータセット自体のライセンス表記は未発見）、NVIDIA Optical Flow（学習データの問題なし。実行部分 nvofapi64.dll は
+    GPU ドライバーに同梱、API 定義のヘッダーは BSD-3）
+- 穴埋めは LaMa をやめ、OpenCV に置き換えた: キーフレームの大きな穴 = xphoto ShiftMap（穴のまわりを切り出して 960px で 3 秒程度）、
+  小さな穴 = Telea。ShiftMap は opencv-contrib-python が必要。opencv-python / -headless と同時に入っていると上書きし合って
+  xphoto が消える（この開発機がその状態。Telea に自動で切り替わる）。setup_env.py は警告と直し方を出すだけで、共用環境は自動で書き換えない
+- 置き換え完了（同日）:
+  - 人物マスク: SAM 2 → **MediaPipe Pose の人物マスク**（`output_segmentation_masks`、num_poses=4）。クリック位置の人物を選び、
+    前フレームと bbox の IoU が最大の人物を追う。見失ったら `mask_hold_frames` だけ直前のマスク、以降は最後の位置の近くで再出現を待つ。
+    歩行素材で 356/356 フレーム追跡。SAM 2 で取りこぼしていた白い靴も入る
+  - フロー: RAFT → **NVIDIA Optical Flow**（`stages/nvof.py`、ctypes で nvofapi64.dll を直接呼ぶ。SDK 不要）。
+    960x536 で 1 組 2.6ms（slow, grid 1）。NVIDIA 以外の GPU は対象外（起動時に「NVIDIA 以外の GPUは利用できません」で終了）。向きは「入力 → 参照」
+  - 結果: 品質優先 全工程 93 秒（以前 190 秒）、クリーンプレート 0.07 秒/フレーム・VRAM 1.1GB。速度優先 60 秒、0.04 秒/フレーム・0.6GB
+  - SAM 2 / RAFT / LaMa のモデルと SAM 2 の取得・導入をセットアップから削除。torch は残す（クリーンプレートの GPU 処理）。torchvision は不要に
+  - 残課題: 品質優先の一部フレームで、頭の上の空に小さな黒い点が残る（髪の色を運んだか、キーフレームの穴埋め由来。未調査）
 
 ## 設計上の決定事項
 
