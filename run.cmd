@@ -49,18 +49,17 @@ if errorlevel 1 (
 )
 for /f "delims=" %%v in ('node --version') do echo [OK] Node.js %%v
 
-rem ---- NVIDIA driver (warning only) -------------------------------------------
+rem ---- NVIDIA GPU (required) ------------------------------------------------------
 where nvidia-smi >nul 2>&1
 if errorlevel 1 (
-    echo [!!] nvidia-smi not found. An NVIDIA GPU and driver are required for SAM2 / ProPainter.
-    echo      https://www.nvidia.com/Download/index.aspx
+    echo [NG] NVIDIA GPU not found. Only NVIDIA GPUs are supported - clean plate uses NVIDIA Optical Flow.
+    echo      If you have an NVIDIA GPU, install the driver:  https://www.nvidia.com/Download/index.aspx
+    echo.
+    pause
+    exit /b 1
 ) else (
     echo [OK] NVIDIA driver
 )
-
-rem ---- git (optional) ---------------------------------------------------------
-where git >nul 2>&1
-if errorlevel 1 echo [..] git not found - SAM2 / ProPainter will be downloaded as zip instead.
 
 rem ---- setup (idempotent) -----------------------------------------------------
 echo.

@@ -1,21 +1,19 @@
 """
-人物クリック → SAM 2 で全フレーム追跡 → mask/%06d.png（0/255）
+人物クリック → MediaPipe Pose の人物マスクで全フレーム追跡 → mask/%06d.png（0/255）
 
-- 左クリック: 対象人物（正例）、右クリック: 除外したい場所（負例）、r: やり直し、Enter: 確定
-- 長尺対策として sam2_chunk_frames ごとに区切り、前チャンク最終フレームのマスクをプロンプトに次を繋ぐ
-- 選択点は shot_NNN/select.json に保存（再開時はクリック不要）
+- 学習データを公開していない・商用可（Apache-2.0）の MediaPipe だけを使う（SAM 2 は学習データ SA-1B が研究用のため不使用）
+- 最初のフレームでクリック位置にいる人物を選び（右クリックの位置にいる人物は除外）、以降は前フレームの人物と
+  最も重なる人物を追う。一時的に見失ったら直前のマスクでつなぎ、長く見失ったら最後の位置の近くで再出現を待つ
+- 左クリック: 対象人物（正例）、右クリック: 除外したい人物（負例）、r: やり直し、Enter: 確定（CLI 時の画面）
+- 選択点は shot_NNN/select.json に保存（再開時はクリック不要。GUI は自分の画面でクリックを受けて書く）
 """
 import argparse
 import json
-import os
-import shutil
 import sys
-import tempfile
 from pathlib import Path
 
 import cv2
 import numpy as np
-import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common import load_config, shot_dirs, done, mark_done, read_meta, frame_files  # noqa: E402
@@ -74,108 +72,147 @@ def pick_points(img_path, title):
     return pts, labels
 
 
-def link_or_copy(src, dst):
-    try:
-        os.link(src, dst)
-    except OSError:
-        shutil.copy(src, dst)
-
-
 def keep_largest_component(m):
-    """飛び地のゴミ成分を落とし、最大の連結成分だけ残す"""
+    """飛び地のゴミ成分を落とし、最大の連結成分（と、その 5% 以上の成分）だけ残す"""
     n, lab, stats, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), connectivity=8)
     if n <= 2:
         return m
     areas = stats[1:, cv2.CC_STAT_AREA]
-    big = 1 + int(np.argmax(areas))
-    # 最大成分の 5% 以上の成分は残す（手足が一時的に切れた場合）
     keep = [i + 1 for i, a in enumerate(areas) if a >= 0.05 * areas.max()]
-    return np.isin(lab, keep) if len(keep) > 1 else (lab == big)
+    return np.isin(lab, keep)
 
 
-def expand_prompt_with_pose(img_path, pts, labels, cfg):
-    """クリック1点だと SAM2 は「腕」など部位を選びがち。MediaPipe で人物を見つけ、
-    人物 bbox + 主要関節の正例点に展開する。見つからなければ None。"""
-    try:
-        import mediapipe as mp
-        from mediapipe.tasks import python as mp_python
-        from mediapipe.tasks.python import vision
-    except ImportError:
+def pose_box(lms, W, H, min_vis=0.5):
+    """ランドマーク → 人物の bbox [x0,y0,x1,y1]（見えている点だけ。少なすぎれば None）"""
+    px = np.array([[l.x * W, l.y * H] for l in lms])
+    vis = np.array([l.visibility for l in lms])
+    good = px[vis > min_vis]
+    if len(good) < 6:
         return None
-    img = cv2.cvtColor(cv2.imread(str(img_path)), cv2.COLOR_BGR2RGB)
-    H, W = img.shape[:2]
+    x0, y0 = good.min(0)
+    x1, y1 = good.max(0)
+    pad = 0.12 * max(x1 - x0, y1 - y0)
+    return np.array([x0 - pad, y0 - pad, x1 + pad, y1 + pad])
+
+
+def iou(a, b):
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    u = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / u if u > 0 else 0.0
+
+
+def contains(box, p):
+    return box[0] <= p[0] <= box[2] and box[1] <= p[1] <= box[3]
+
+
+class PersonTracker:
+    """クリックで選んだ人物を、MediaPipe Pose の検出（複数人）の中から追い続ける"""
+
+    def __init__(self, pts, labels, W, H, hold_frames):
+        self.pos = [np.array(p, float) for p, l in zip(pts, labels) if l == 1]
+        self.neg = [np.array(p, float) for p, l in zip(pts, labels) if l == 0]
+        self.W, self.H = W, H
+        self.box = None          # 追っている人物の bbox
+        self.mask = None         # 直前のマスク（確率）
+        self.missing = 0
+        self.hold = hold_frames
+
+    def _first(self, cands):
+        """まだ人物が決まっていない: 正例クリックを含む（無ければ最も近い）人物。負例を含む人物は除く"""
+        best, best_d = None, 1e18
+        for c in cands:
+            if any(contains(c["box"], q) for q in self.neg):
+                continue
+            ctr = (c["box"][:2] + c["box"][2:]) / 2
+            d = min(0.0 if contains(c["box"], q) else float(np.linalg.norm(q - ctr)) for q in self.pos)
+            if d < best_d:
+                best, best_d = c, d
+        return best if best is not None and best_d < 0.25 * max(self.W, self.H) else None
+
+    def _follow(self, cands):
+        """前フレームの人物と最も重なる人物。見失っている間は、最後の位置の近くにいる人物"""
+        best, score = None, 0.0
+        for c in cands:
+            s = iou(self.box, c["box"])
+            if s > score:
+                best, score = c, s
+        if score >= 0.1:
+            return best
+        if self.missing > 0:
+            ctr = (self.box[:2] + self.box[2:]) / 2
+            size = max(self.box[2] - self.box[0], self.box[3] - self.box[1])
+            near = [(float(np.linalg.norm((c["box"][:2] + c["box"][2:]) / 2 - ctr)), c) for c in cands]
+            near = [x for x in near if x[0] < max(size, 0.1 * max(self.W, self.H))]
+            if near:
+                return min(near, key=lambda x: x[0])[1]
+        return None
+
+    def step(self, cands):
+        c = self._first(cands) if self.box is None else self._follow(cands)
+        if c is not None:
+            self.box, self.mask, self.missing = c["box"], c["mask"], 0
+            return c["mask"], "ok"
+        self.missing += 1
+        if self.mask is not None and self.missing <= self.hold:
+            return self.mask, "hold"          # 一時的に見失った: 直前のマスクでつなぐ
+        return np.zeros((self.H, self.W), np.float32), "lost"
+
+
+def make_landmarker(cfg, num_poses):
+    from mediapipe.tasks import python as mp_python
+    from mediapipe.tasks.python import vision
     opts = vision.PoseLandmarkerOptions(
         base_options=mp_python.BaseOptions(model_asset_path=cfg["mediapipe_model"]),
-        running_mode=vision.RunningMode.IMAGE, num_poses=6,
-        min_pose_detection_confidence=0.3, min_pose_presence_confidence=0.3)
-    with vision.PoseLandmarker.create_from_options(opts) as lm:
-        res = lm.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(img)))
-    click = np.array([p for p, l in zip(pts, labels) if l == 1][0], float)
-    best, best_d = None, 1e18
-    for lms in res.pose_landmarks or []:
-        px = np.array([[l.x * W, l.y * H] for l in lms])
-        vis = np.array([l.visibility for l in lms])
-        good = px[vis > 0.5]
-        if len(good) < 6:
-            continue
-        x0, y0 = good.min(0); x1, y1 = good.max(0)
-        pad = 0.12 * max(x1 - x0, y1 - y0)
-        box = [max(0, x0 - pad), max(0, y0 - pad), min(W, x1 + pad), min(H, y1 + pad)]
-        inside = box[0] <= click[0] <= box[2] and box[1] <= click[1] <= box[3]
-        d = 0 if inside else np.linalg.norm(click - [(x0 + x1) / 2, (y0 + y1) / 2])
-        if d < best_d:
-            best_d, best = d, (box, px, vis)
-    if best is None or best_d > 0.25 * max(W, H):
-        return None
-    box, px, vis = best
-    key = [0, 11, 12, 23, 24, 25, 26, 27, 28]   # 鼻 肩 腰 膝 足首
-    extra = [px[i].tolist() for i in key if vis[i] > 0.6]
-    return {"points": list(pts) + extra, "labels": list(labels) + [1] * len(extra),
-            "box": [float(v) for v in box]}
+        running_mode=vision.RunningMode.VIDEO, num_poses=num_poses, output_segmentation_masks=True,
+        min_pose_detection_confidence=0.3, min_pose_presence_confidence=0.3, min_tracking_confidence=0.5)
+    return vision.PoseLandmarker.create_from_options(opts)
 
 
-def largest_multimask(predictor, img_path, pts, labels):
-    """フォールバック: 画像予測の multimask から、クリックを含む最大のマスク（＝人物全体）を選ぶ"""
-    from sam2.sam2_image_predictor import SAM2ImagePredictor
-    ip = SAM2ImagePredictor(predictor)
-    img = cv2.cvtColor(cv2.imread(str(img_path)), cv2.COLOR_BGR2RGB)
-    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-        ip.set_image(img)
-        masks, scores, _ = ip.predict(point_coords=np.array(pts, np.float32),
-                                      point_labels=np.array(labels, np.int32), multimask_output=True)
-    click = [p for p, l in zip(pts, labels) if l == 1][0]
-    cand = [m for m in masks if m[int(click[1]), int(click[0])]]
-    if not cand:
-        cand = list(masks)
-    return max(cand, key=lambda m: m.sum()).astype(bool)
-
-
-def track_chunk(predictor, frames, first_prompt, out_dir, offset, skip_first):
-    """frames: このチャンクの jpg リスト。first_prompt: ('points', dict) | ('mask', bool HxW)。
-    マスクを out_dir/{offset+i:06d}.png に書き、最終フレームのマスク(bool)を返す。"""
-    with tempfile.TemporaryDirectory(prefix="sam2_", dir=out_dir.parent) as td:
+def track_shot(sd, cfg, pts, labels):
+    import mediapipe as mp
+    meta = read_meta(sd)
+    frames = frame_files(sd)
+    n = len(frames)
+    W, H = meta["width"], meta["height"]
+    fps = meta.get("fps") or 30.0
+    mask_dir = sd / "mask"
+    mask_dir.mkdir(exist_ok=True)
+    thr = float(cfg.get("mask_threshold", 0.5))
+    smooth = float(cfg.get("mask_temporal_smooth", 0.3))
+    tracker = PersonTracker(pts, labels, W, H, int(cfg.get("mask_hold_frames", 8)))
+    stats = {"ok": 0, "hold": 0, "lost": 0}
+    prev_prob = None
+    with make_landmarker(cfg, int(cfg.get("mask_num_poses", 4))) as lm:
         for i, f in enumerate(frames):
-            link_or_copy(f, Path(td) / f"{i:06d}.jpg")
-        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-            state = predictor.init_state(video_path=td, offload_video_to_cpu=len(frames) > 400)
-            kind, a = first_prompt
-            if kind == "points":
-                predictor.add_new_points_or_box(
-                    state, frame_idx=0, obj_id=1,
-                    points=np.array(a["points"], dtype=np.float32), labels=np.array(a["labels"], np.int32),
-                    box=np.array(a["box"], np.float32) if a.get("box") else None)
-            else:
-                predictor.add_new_mask(state, frame_idx=0, obj_id=1, mask=torch.from_numpy(a))
-            last = None
-            for fidx, _, logits in predictor.propagate_in_video(state):
-                m = keep_largest_component((logits[0, 0] > 0).cpu().numpy())
-                last = m
-                if fidx == 0 and skip_first:
+            img = cv2.cvtColor(cv2.imread(str(f)), cv2.COLOR_BGR2RGB)
+            res = lm.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(img)),
+                                      int(round(i * 1000.0 / fps)))
+            cands = []
+            for k, lms in enumerate(res.pose_landmarks or []):
+                box = pose_box(lms, W, H)
+                if box is None or not res.segmentation_masks or k >= len(res.segmentation_masks):
                     continue
-                cv2.imwrite(str(out_dir / f"{offset + fidx:06d}.png"), m.astype(np.uint8) * 255)
-            predictor.reset_state(state)
-    torch.cuda.empty_cache()
-    return last
+                prob = res.segmentation_masks[k].numpy_view()
+                prob = prob[:, :, 0] if prob.ndim == 3 else prob
+                cands.append({"box": box, "mask": np.array(prob, np.float32)})
+            prob, st = tracker.step(cands)
+            stats[st] += 1
+            # 時間方向に少しだけならす（輪郭のちらつき対策）。見失った直後はならさない
+            if prev_prob is not None and st == "ok" and smooth > 0:
+                prob = (1 - smooth) * prob + smooth * prev_prob
+            prev_prob = prob if st == "ok" else None
+            m = prob > thr
+            if m.any():
+                m = keep_largest_component(m)
+            cv2.imwrite(str(mask_dir / f"{i:06d}.png"), m.astype(np.uint8) * 255)
+            if (i + 1) % 50 == 0 or i + 1 == n:
+                print(f"  {sd.name}: masked 0-{i + 1}/{n}", flush=True)
+    if stats["ok"] == 0:
+        raise SystemExit(f"{sd.name}: クリックした位置に人物が見つかりませんでした。人物の胴体あたりをクリックしてください")
+    print(f"  {sd.name}: tracked {stats['ok']} / held {stats['hold']} / lost {stats['lost']} frames", flush=True)
+    return n, W, H
 
 
 def main():
@@ -185,7 +222,7 @@ def main():
     a = ap.parse_args()
     cfg = load_config(a.work)
 
-    # 先にクリックを全部済ませる（GPU ロード待ちの間に UI が出ないように）
+    # 先にクリックを全部済ませる
     todo = [sd for sd in shot_dirs(a.work) if not done(sd, 1)]
     first = None
     for sd in todo:
@@ -201,45 +238,11 @@ def main():
             first = first or (pts, labels)
         sel.write_text(json.dumps({"points": pts, "labels": labels}), encoding="utf-8")
 
-    if not todo:
-        return
-    from sam2.build_sam import build_sam2_video_predictor
-    predictor = build_sam2_video_predictor(cfg["sam2_cfg"], cfg["sam2_ckpt"], device="cuda")
-    chunk = int(cfg["sam2_chunk_frames"])
-
     for sd in todo:
-        meta = read_meta(sd)
-        frames = frame_files(sd)
-        n = len(frames)
-        mask_dir = sd / "mask"
-        mask_dir.mkdir(exist_ok=True)
         d = json.loads((sd / "select.json").read_text(encoding="utf-8"))
-        # クリック → 人物全体のプロンプトへ展開
-        exp = expand_prompt_with_pose(frames[0], d["points"], d["labels"], cfg)
-        if exp is not None:
-            prompt = ("points", exp)
-            print(f"  {sd.name}: prompt expanded via pose (box + {len(exp['points'])} points)", flush=True)
-        else:
-            prompt = ("mask", largest_multimask(predictor, frames[0], d["points"], d["labels"]))
-            print(f"  {sd.name}: prompt expanded via multimask (largest)", flush=True)
-        start = 0
-        while start < n:
-            end = min(n, start + chunk)
-            last = track_chunk(predictor, frames[start:end], prompt, mask_dir, start, skip_first=start > 0)
-            print(f"  {sd.name}: masked {start}-{end}/{n}", flush=True)
-            if end >= n:
-                break
-            if last is None or not last.any():
-                # 人物がフレームアウトした: 以降は空マスク。再出現は追えない（制約）
-                for i in range(end, n):
-                    cv2.imwrite(str(mask_dir / f"{i:06d}.png"), np.zeros(last.shape, np.uint8))
-                print(f"  {sd.name}: target lost at frame {end}, rest empty", flush=True)
-                break
-            prompt = ("mask", last)
-            start = end - 1   # 1 フレーム重ねてマスクで繋ぐ
-        assert len(list(mask_dir.glob("*.png"))) >= n, "mask count mismatch"
-        mark_done(sd, 1)
-        print(f"  {sd.name}: mask ok ({n} frames, {meta['width']}x{meta['height']})", flush=True)
+        n, W, H = track_shot(sd, cfg, d["points"], d["labels"])
+        mark_done(sd, 1, cfg)
+        print(f"  {sd.name}: mask ok ({n} frames, {W}x{H})", flush=True)
 
 
 if __name__ == "__main__":

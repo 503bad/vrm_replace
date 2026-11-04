@@ -2,7 +2,7 @@
 
 実写動画の人物を VRM キャラクターに置き換えるツール（Windows / NVIDIA GPU）。
 
-*Replace a person in a video with a VRM avatar: click the person once, get an mp4. Windows + NVIDIA GPU. Pipeline: SAM 2 (mask) → MediaPipe (body + finger mocap) → ProPainter (clean plate) → three-vrm in headless Chrome (render, spring bones) → ffmpeg (composite).*
+*Replace a person in a video with a VRM avatar: click the person once, get an mp4. Windows + NVIDIA GPU. Pipeline: MediaPipe (person mask, body + finger mocap) → three-vrm in headless Chrome (render, spring bones) → NVIDIA Optical Flow (GPU hardware) + OpenCV inpainting (clean plate) → ffmpeg (composite). Two presets: quality (standard) / speed (lightweight). AI models are limited to ones whose weights and training data both allow commercial use (or whose training data is undisclosed and the weights allow commercial use).*
 
 ```
 git clone https://github.com/503bad/vrm_replace.git
@@ -11,7 +11,7 @@ run.cmd      ← ダブルクリックでも可
 ```
 
 1. `run.cmd` が Python / Node.js / NVIDIA ドライバを確認し、無ければ導入先を表示して止まります
-2. 初回は依存ライブラリと **再配布不可のモデル**（SAM 2、MediaPipe、ProPainter の重み、Chrome）を自動で取得します（合計 1〜4GB、PyTorch が無い場合はさらに約 3GB）
+2. 初回は依存ライブラリと **再配布不可のモデル**（MediaPipe のモデル、Chrome）を自動で取得します（合計 1GB 程度、PyTorch が無い場合はさらに約 3GB）
 3. GUI が開くので、動画と VRM を「参照...」で選んで「実行」
 4. 最初のフレームが表示されるので、置き換える人物を **左クリック → Enter**（右クリックで除外点、`r` でやり直し）
 5. あとは放置。進捗は GUI のログに出ます。終わると出力先に mp4 ができます
@@ -23,7 +23,7 @@ run.cmd      ← ダブルクリックでも可
 | 項目 | 要件 |
 |---|---|
 | OS | Windows 10 / 11（64bit） |
-| GPU | NVIDIA（VRAM 12GB 以上推奨。RTX 50 系対応） |
+| GPU | NVIDIA のみ（Turing / RTX 20 系以降が必須。NVIDIA 以外の GPU では起動時に終了します。VRAM 4GB 以上。RTX 50 系対応） |
 | Python | 3.10 以上（3.12 推奨）。[python.org](https://www.python.org/downloads/windows/) のインストーラで「Add python.exe to PATH」を ON |
 | Node.js | 18 以上（[LTS](https://nodejs.org/)） |
 | git | 任意（無ければ zip でダウンロードします） |
@@ -35,8 +35,13 @@ CUDA Toolkit のインストールは不要です（PyTorch の CUDA 12.8 版を
 
 ### GUI（`run.cmd` / `python gui.py`）
 
-- 動画 / VRM / 出力先を選んで「実行」。進捗ログが下に流れ、上部のステータスに現在の工程が出ます
-- 「停止」で中断しても、同じ設定で「実行」すれば済んだ工程は飛ばして続きから進みます
+- **動画と VRM をウィンドウにドロップ**するだけ（どこに落としても拡張子で振り分けます）。カードをクリックしてファイルを選ぶこともできます
+  - 動画は解像度・fps・長さとサムネイル、VRM はバージョン（0.x / 1.0）・作者・**利用条件（商用利用・アバターの利用の可否）**を表示します。不可の項目は赤
+  - 出力先は `out/<動画名>_vrm.mp4` に自動で決まります（「変更」で指定も可）
+- 「START」を押すと、ショット分割のあと**画面の中で人物をクリック**します（左クリック: 人物、右クリック: 除外、R: やり直し、Enter: 確定、Esc: 中止）。あとは放置で完了します
+- 右側に工程ごとの進み具合・経過時間・残り時間、完了すると結果のプレビューと「再生」「フォルダを開く」が出ます。下の LOG で詳しいログを開けます
+- 「STOP」で中断しても、同じ設定で「START」すれば済んだ工程は飛ばして続きから進みます
+- 画面は `app/ui`（HTML/CSS/JS、pywebview + WebView2）、処理は `app/backend.py`。見た目の決まりは `app/ui/app.css` の冒頭
 - オプション
 
   | オプション | 内容 |
@@ -44,15 +49,27 @@ CUDA Toolkit のインストールは不要です（PyTorch の CUDA 12.8 版を
   | 関節を人間の可動域に制限する | 肘・膝の逆曲がり、手首の折れ、上腕のねじれ等をクランプ（`stages/joint_limits.py`） |
   | 手が検出できない区間を前後の検出で補間する | 手のひらがフレームごとに別方向を向く「パタつき」対策。外れ値の検出も捨てる |
   | 指をトラッキングする | MediaPipe Hand Landmarker で指の曲げを推定 |
-  | クリーンプレート | ProPainter で実写の人物を消す。OFF だと元映像の上に重ねるだけ（確認用、数分で終わる） |
+  | 処理モード | **品質優先（通常）** / **速度優先（軽量）**。下の「処理モード」参照 |
+  | クリーンプレート | 実写の人物を消す。OFF だと元映像の上に重ねるだけ（確認用、数分で終わる） |
   | 先頭 N フレームだけ処理 | 設定を試すとき |
-  | やり直し開始工程 | 指定した工程以降を作り直す。上 3 つの ON/OFF を変えただけなら不要（自動でモーキャプから再計算） |
+  | やり直し開始工程 | 指定した工程以降を作り直す。処理モードや上 3 つの ON/OFF を変えただけなら不要（必要な工程から自動で再計算） |
+
+### 処理モード（プリセット）
+
+| | 品質優先（通常） | 速度優先（軽量） |
+|---|---|---|
+| MediaPipe Pose（人物マスク・モーキャプ） | heavy | full |
+| クリーンプレートの処理解像度（長辺） | 960 | 720 |
+| オプティカルフロー（NVIDIA Optical Flow） | 高精度（slow）、画素ごと、前後両方向から背景を運ぶ | 高速（fast）、4×4 ごと、過去からのみ |
+
+値は `config.yaml` の `presets:` にあります。同じキーを `config.yaml` の上位に書くと、プリセットより優先されます。
+選んだモードは `work/<動画名>/options.json` に保存され、変えると結果に影響する工程から作り直します。
 
 ### CLI
 
 ```
 python run.py --video input.mp4 --vrm chara.vrm --out result.mp4
-    [--no-cleanplate] [--max-frames N] [--from N] [--auto] [--work DIR]
+    [--preset quality|speed] [--no-cleanplate] [--max-frames N] [--from N] [--auto] [--work DIR]
     [--joint-limits on|off] [--hand-interpolate on|off] [--fingers on|off]
 ```
 
@@ -67,10 +84,10 @@ python tools/render_selftest.py --vrm x.vrm    # VRM を読んで 4 枚描画（
 | 工程 | スクリプト | 使うもの | GPU |
 |---|---|---|---|
 | 0 ショット分割・フレーム展開 | `stages/s0_shots.py` | PySceneDetect, ffmpeg | - |
-| 1 人物マスク（クリック→追跡） | `stages/s1_mask.py` | SAM 2 | 〜7GB |
+| 1 人物マスク（クリック→追跡） | `stages/s1_mask.py` | MediaPipe Pose の人物マスク（CPU） | - |
 | 2 モーキャプ（体・手首・指） | `stages/s2_mocap.py` | MediaPipe Pose / Hand（CPU） | - |
-| 3 クリーンプレート | `stages/s3_cleanplate.py` | ProPainter | 〜15GB（設定で削減可） |
 | 4 VRM にモーション適用→透過レンダー | `stages/s4_render.py` → `render/s4_threevrm.js` | three-vrm + ヘッドレス Chrome | 少 |
+| 3 クリーンプレート（4 の後に実行） | `stages/s3_cleanplate.py` | NVIDIA Optical Flow + OpenCV | 1GB 程度（下の「実測」） |
 | 5 合成・音声・結合 | `stages/s5_final.py` | ffmpeg | - |
 
 ```
@@ -78,6 +95,7 @@ vrm_replace/
   run.cmd            Windows 用ランチャー（環境チェック → setup_env.py → gui.py）
   setup_env.py       依存・モデルの導入（冪等）
   gui.py / run.py    GUI / CLI のエントリ。run.py が各工程を subprocess で順に呼ぶ
+  app/               GUI（backend.py: 処理側、media.py: 動画・VRM の情報、ui/: 画面の HTML/CSS/JS）
   common.py          設定読み込み・共通ユーティリティ
   config.yaml        既定の設定（しきい値、VRAM 対策、ライト等）
   stages/            各工程。mocap_common.py に mocap.json の仕様、joint_limits.py に可動域表
@@ -108,8 +126,11 @@ work/<video>/shot_000/
 - VRM のスケールは実写人物の脚長（MediaPipe の world landmark から推定）に VRM の股関節高さを合わせます（`person_hip_height: auto`）。足の接地を優先するため、体型が違うと頭の高さはズレますが、実写人物はクリーンプレートで消えるので目立ちません。
 - **指**: 各手首まわりをクロップして Hand Landmarker を掛け、片手 15 本の回転を mocap.json に入れます。mocap 側の基準は「手の方向にまっすぐ伸びた指」で、VRM ごとの実際のレスト方向（親指の角度・指の開き）との差は s4 が正規化リグから読んで補正します。
 - **可動域制限**: 親相対の回転をボーン軸まわりの swing/twist に分解し、関節ごとの範囲でクランプして FK で戻します。全バックエンド共通です。
-- s1 のクリックは 1 点で十分です。内部で MediaPipe が人物を特定し、bbox + 関節点に展開して SAM 2 に渡します。長尺は `sam2_chunk_frames` ごとに区切り、マスクで繋ぎます。
-- ProPainter は全フレームを GPU/RAM に持つので `propainter_segment_frames`（既定 300）ごとに分割し、`propainter_max_side`（既定 960）に縮小して処理、**インペイントした領域だけ**を元フレームに貼り戻します。VRAM が 16GB を超えそうなら `propainter_subvideo` を下げてください。
+- s1 のクリックは 1 点で十分です。MediaPipe Pose で複数人を検出し、クリック位置にいる人物（右クリックの位置にいる人物は除外）を選んで、以降は前フレームと最も重なる人物を追います。一時的に見失ったら直前のマスクでつなぎ（`mask_hold_frames`）、長く見失ったら最後の位置の近くで再出現を待ちます。
+- **クリーンプレート**（工程 3）は工程 4 のレンダーの後に実行します。埋めるのは「太らせた人物マスク − アバターの不透明部分（縁から `cleanplate_band_margin_px` 内側まで）」だけです（`cleanplate_avatar_band`）。アバターで隠れる部分は埋めないので速く、見える部分に処理が集中します。代わりに VRM を変えるとクリーンプレートも作り直しになります（自動）。
+  - 隣のフレームとのオプティカルフローを NVIDIA Optical Flow（GPU 内蔵の専用ハードウェア。ドライバーに同梱され、追加のダウンロードは不要。Turing 以降）で求め（人物の上のフローは周囲から補間）、他のフレームに映っている背景を「元の画素の座標」として運びます。座標で運ぶので、何フレーム運んでもぼけが溜まりません
+  - どのフレームにも映っていない穴は、キーフレームで OpenCV の ShiftMap（周囲の模様をずらして貼る、学習データを使わない従来手法）で埋めてから以降のフレームに運びます（毎フレーム埋めるより速く、ちらつかない）
+  - `cleanplate_segment_frames`（既定 300）ごとに分割し、`cleanplate_max_side` に縮小して処理、**埋めた領域だけ**を元フレームに貼り戻します
 
 ### モーキャプのバックエンド（`config.yaml: mocap_backend`）
 
@@ -119,14 +140,25 @@ work/<video>/shot_000/
 | `smpl_npz` | SMPL 系推定器の品質そのまま | 自前 | `shot_NNN/mocap.npz`（`pose (F,22,3)` axis-angle, `transl (F,3)` カメラ座標, `K (3,3)`）を置く |
 | `gvhmr` | 高 | GVHMR を別環境に構築 | `gvhmr_cmd` / `gvhmr_result` を設定。未検証 |
 
+### 実測（RTX 5060 Ti 16GB、1280x720・356 フレームの歩行素材、カメラはパン）
+
+| | 品質優先（通常） | 速度優先（軽量） |
+|---|---|---|
+| クリーンプレート | 0.07 秒/フレーム（28 秒） | 0.04 秒/フレーム（14 秒） |
+| クリーンプレートの VRAM（ピーク） | 1.1GB | 0.6GB |
+| 全工程（0〜5） | 約 1 分 33 秒 | 約 1 分 |
+
+※ 参考値です。速度優先はフローの精度が落ちるぶん、人物の通った跡ににじみが出やすくなります。
+
 ## config.yaml の主な項目
 
 - `scene_threshold` ショット分割感度 / `min_shot_frames` 短すぎるショットの吸収
-- `sam2_chunk_frames` SAM2 に一度に渡すフレーム数（RAM/VRAM）
+- `mask_threshold`, `mask_temporal_smooth`, `mask_hold_frames`, `mask_num_poses`（人物マスク）
 - `focal_scale`（焦点距離 = focal_scale × max(幅, 高さ)。望遠素材なら上げる）, `mocap_smooth_sigma`, `use_hands`, `crop_margin`
 - `use_fingers`, `hand_crop_scale`, `hand_min_crop_px`, `finger_smooth_sigma`, `finger_max_splay_deg`（指）
 - `joint_limits`, `hand_interpolate`, `hand_outlier_deg`（GUI / CLI で上書き可。可動域の角度表は `stages/joint_limits.py: LIMITS`）
-- `propainter_subvideo`, `propainter_neighbor`, `propainter_max_side`, `propainter_segment_frames`, `mask_dilate_px`
+- `preset`（quality / speed）と `presets:`（モードごとの値）
+- `mask_dilate_px`, `cleanplate_segment_frames`, `cleanplate_avatar_band`, `cleanplate_band_margin_px`, `cleanplate_key_interval`, `cleanplate_fill`, `cleanplate_flow_batch`（クリーンプレート）
 - `person_hip_height`（auto / 数値[m]）, `arm_offset_deg`（SMPL 系のみ）, `render_warmup_frames`, ライト各種
 - `chrome_exe` GPU が効かない場合にインストール済み Chrome を指定 / `allow_software_gl`
 
@@ -143,12 +175,12 @@ work/<video>/shot_000/
 
 - `run.cmd` が「Python が見つからない」で止まる: python.org のインストーラで「Add python.exe to PATH」を ON にして入れ直すか、`py` ランチャーが使える状態にしてください
 - GPU レンダリングが効かない（SwiftShader と表示される）: `config.yaml` の `chrome_exe` にインストール済み Chrome のパスを指定。それでも駄目なら `allow_software_gl: true`（遅くなります）
-- ProPainter が極端に遅い: VRAM が溢れて共有メモリに退避しています。`propainter_subvideo` を 20 に、`propainter_max_side` を 720 に下げてください
+- クリーンプレートが極端に遅い: VRAM が溢れて共有メモリに退避しています。速度優先モードにするか、`cleanplate_flow_batch` を 1〜2 に、`cleanplate_segment_frames` を 150 に下げてください
 - セットアップに失敗した: `logs/setup.log` を確認。`python setup_env.py --force` で再導入できます
 
 ## ライセンス
 
 vrm_replace 本体は [Apache License 2.0](LICENSE) です。
 
-`run.cmd` が取得する SAM 2、MediaPipe、three-vrm、ProPainter などはそれぞれのライセンスに従います（[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）。
-**ProPainter は非商用・研究目的限定（S-Lab License 1.0）** です。商用利用する場合はクリーンプレート工程を差し替えるか無効化してください。
+`run.cmd` が取得する MediaPipe、three-vrm などはそれぞれのライセンスに従います（[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）。
+AI モデルは、学習データの条件まで含めて商用利用できるものだけを使います（詳しくは THIRD_PARTY_NOTICES.md）。

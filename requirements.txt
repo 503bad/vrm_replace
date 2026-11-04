@@ -1,7 +1,8 @@
 # Windows / Python 3.10+. torch (CUDA 12.8 版) は setup_env.py が別途導入する:
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
 numpy
-opencv-python
+# OpenCV は contrib 版（穴埋めの ShiftMap = cv2.xphoto を使う）。opencv-python と同時に入れると上書きし合うので入れない
+opencv-contrib-python
 pyyaml
 tqdm
 pillow
@@ -9,10 +10,6 @@ imageio
 imageio-ffmpeg
 scenedetect
 mediapipe
-# SAM 2 (Windows: CUDA 拡張なしで動く)
-hydra-core
-iopath
-# ProPainter
-einops
 scipy
-av
+# GUI（WebView2 で HTML の画面を出す。Windows 11 は WebView2 ランタイムが標準で入っている）
+pywebview

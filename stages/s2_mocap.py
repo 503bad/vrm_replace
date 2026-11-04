@@ -488,7 +488,7 @@ def main():
             m["valid"] = v + [False] * (n - len(v))
             m["n_frames"] = n
         write_mocap(sd / "mocap.json", m)
-        mark_done(sd, 2)
+        mark_done(sd, 2, cfg)
         print(f"  {sd.name}: mocap ok ({m['n_frames']} frames)", flush=True)
 
 

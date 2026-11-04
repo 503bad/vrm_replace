@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>vrm_replace</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="logo">vrm_replace</div>
+    <div class="sub mono">
+      <span>VIDEO PERSON &rarr; VRM AVATAR</span>
+      <span>MEDIAPIPE / THREE-VRM / NVIDIA OPTICAL FLOW / OPENCV</span>
+    </div>
+  </div>
+  <div class="top-right">
+    <div class="chip mono" id="phase">READY</div>
+    <div class="clock"><span class="mono lbl">ELAPSED</span><span class="num" id="elapsed">0:00</span></div>
+  </div>
+</header>
+
+<main>
+  <section class="col-left">
+    <div class="sect"><span class="mark"></span><span class="mono t">SOURCE</span>
+      <span class="hint">動画と VRM をウィンドウにドロップ（種類は自動で判別）</span></div>
+    <div class="drops">
+      <div class="drop" id="drop-video" data-kind="video">
+        <div class="drop-media"><img alt=""><div class="drop-empty">
+          <div class="mono big">DROP VIDEO</div><div class="mono small">MP4 · MOV · AVI · MKV · WEBM</div>
+          <div class="small dim">またはクリックして選択</div></div></div>
+        <div class="drop-info">
+          <div class="mono cap">VIDEO</div>
+          <div class="name" data-f="name">—</div>
+          <div class="meta num" data-f="meta"></div>
+        </div>
+        <button class="x" title="外す">&times;</button>
+      </div>
+      <div class="drop" id="drop-vrm" data-kind="vrm">
+        <div class="drop-media square"><img alt=""><div class="drop-empty">
+          <div class="mono big">DROP VRM</div><div class="mono small">VRM 0.X / 1.0</div>
+          <div class="small dim">またはクリックして選択</div></div></div>
+        <div class="drop-info">
+          <div class="mono cap">AVATAR <span class="ver num" data-f="ver"></span></div>
+          <div class="name" data-f="name">—</div>
+          <div class="meta" data-f="meta"></div>
+          <div class="terms" data-f="terms"></div>
+        </div>
+        <button class="x" title="外す">&times;</button>
+      </div>
+    </div>
+
+    <div class="sect"><span class="mark"></span><span class="mono t">OUTPUT</span></div>
+    <div class="out-row">
+      <div class="out-path" id="out-path">—</div>
+      <button class="plate sm" id="btn-out">変更</button>
+    </div>
+
+    <div class="sect"><span class="mark"></span><span class="mono t">MODE</span>
+      <span class="hint">処理時に選べます。変えると影響する工程から自動でやり直します</span></div>
+    <div class="modes">
+      <button class="mode" data-preset="quality">
+        <div class="mono cap">QUALITY</div>
+        <div class="mode-name">品質優先<span class="dim">（通常）</span></div>
+        <div class="mode-spec mono">POSE HEAVY · 960PX · OPTICAL FLOW SLOW ×1 · BIDIRECTIONAL</div>
+      </button>
+      <button class="mode" data-preset="speed">
+        <div class="mono cap">SPEED</div>
+        <div class="mode-name">速度優先<span class="dim">（軽量）</span></div>
+        <div class="mode-spec mono">POSE FULL · 720PX · OPTICAL FLOW FAST ×4 · FORWARD</div>
+      </button>
+    </div>
+
+    <div class="sect"><span class="mark"></span><span class="mono t">OPTIONS</span></div>
+    <div class="opts">
+      <button class="tog" data-opt="joint_limits"><span class="sq"></span><span>関節を人間の可動域に制限</span></button>
+      <button class="tog" data-opt="hand_interpolate"><span class="sq"></span><span>手の欠損を前後から補間</span></button>
+      <button class="tog" data-opt="fingers"><span class="sq"></span><span>指をトラッキング</span></button>
+      <button class="tog" data-opt="cleanplate"><span class="sq"></span><span>実写の人物を消す</span></button>
+      <button class="tog" data-opt="auto"><span class="sq"></span><span>2 ショット目以降も同じ位置で選択</span></button>
+    </div>
+    <details class="adv">
+      <summary class="mono">ADVANCED</summary>
+      <div class="adv-row">
+        <label>先頭 N フレームだけ処理<span class="dim">（0 = 全部）</span></label>
+        <input type="number" min="0" step="30" id="max-frames" class="num">
+      </div>
+      <div class="adv-row">
+        <label>やり直す工程</label>
+        <select id="from-stage">
+          <option value="0">なし（済んだ工程は飛ばす）</option>
+          <option value="1">1 人物マスク（クリックから）</option>
+          <option value="2">2 モーションキャプチャ</option>
+          <option value="4">4 VRM レンダー</option>
+          <option value="3">3 人物を消す</option>
+          <option value="5">5 合成</option>
+        </select>
+      </div>
+    </details>
+  </section>
+
+  <section class="col-right">
+    <div class="sect"><span class="mark"></span><span class="mono t">PIPELINE</span>
+      <span class="hint num" id="shots"></span></div>
+    <div class="stages" id="stages"></div>
+
+    <div class="actions">
+      <button class="go" id="btn-start">
+        <span class="go-icon"></span>
+        <span class="go-text"><span class="mono">START</span><span class="go-sub" id="go-sub">動画と VRM をドロップしてください</span></span>
+      </button>
+      <button class="stop" id="btn-stop"><span class="sq"></span><span class="mono">STOP</span></button>
+    </div>
+
+    <div class="result" id="result">
+      <div class="result-img"><img alt=""></div>
+      <div class="result-row">
+        <div class="result-name" id="result-name"></div>
+        <div class="result-btns">
+          <button class="plate sm accent" id="btn-play">再生</button>
+          <button class="plate sm" id="btn-folder">フォルダを開く</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="status" id="status">準備ができたら START を押してください</div>
+  <button class="logbtn mono" id="btn-log">LOG</button>
+</footer>
+<div class="log" id="log"><pre id="log-text"></pre></div>
+
+<div class="overlay drag" id="ov-drag">
+  <div class="drag-box"><div class="mono big">DROP</div><div class="small">動画 / VRM（種類は自動で判別）</div></div>
+</div>
+
+<div class="overlay pick" id="ov-pick">
+  <div class="pick-head">
+    <div><span class="mark"></span><span class="mono t">SELECT PERSON</span>
+      <span class="num pick-shot" id="pick-shot"></span></div>
+    <div class="pick-help">
+      <span><b class="k">左クリック</b> 置き換える人物</span>
+      <span><b class="k red">右クリック</b> 除外したい場所</span>
+      <span><b class="k">R</b> やり直し</span>
+      <span><b class="k">ENTER</b> 確定</span>
+      <span><b class="k">ESC</b> 中止</span>
+    </div>
+  </div>
+  <div class="pick-stage"><div class="pick-frame" id="pick-frame"><img alt=""><div class="pts" id="pick-pts"></div></div></div>
+  <div class="pick-foot">
+    <div class="small dim" id="pick-msg">人物の胴体あたりを 1 回クリックすれば十分です</div>
+    <div class="pick-btns">
+      <button class="plate sm" id="pick-reset">やり直し</button>
+      <button class="plate sm" id="pick-cancel">中止</button>
+      <button class="plate accent" id="pick-ok">確定</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
