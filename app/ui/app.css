@@ -222,6 +222,7 @@ footer { display: flex; align-items: center; justify-content: space-between; pad
 .status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status.ng { color: var(--red); }
 .status.ok { color: var(--ink); }
+.foot-btns { display: flex; gap: 4px; }
 .logbtn { font-size: 9px; color: var(--dim); padding: 4px 10px; }
 .logbtn.on { color: var(--accent); }
 .log { position: fixed; left: 0; right: 0; bottom: 34px; height: 42vh; background: rgba(12, 13, 16, .97);
@@ -241,6 +242,24 @@ footer { display: flex; align-items: center; justify-content: space-between; pad
 @keyframes pop { from { transform: scale(.94); opacity: 0; } to { transform: none; opacity: 1; } }
 .overlay.pick { flex-direction: column; background: var(--bg); padding: 16px 22px; gap: 10px; }
 .overlay.pick.show { animation: fade .35s var(--expo); }
+.overlay.about { flex-direction: column; background: var(--bg); padding: 16px 22px; gap: 12px; z-index: 12; }
+.overlay.about.show { animation: fade .35s var(--expo); }
+.about-head { display: flex; align-items: center; justify-content: space-between; }
+.about-head > div { display: flex; align-items: center; gap: 9px; }
+.about-head .t { font-size: 11px; }
+.about-credit { background: var(--plate); padding: 14px 18px; clip-path: var(--chamfer); display: flex; flex-direction: column; gap: 4px; }
+.about-app { font-size: 15px; }
+.about-by { font-family: var(--f-num); font-size: 13px; color: var(--accent); }
+.about-links { display: flex; gap: 8px; margin-top: 6px; }
+.about-links .plate { background: var(--plate-hi); }
+.about-links .plate:hover { background: var(--accent); color: #16110b; }
+.about-tabs { display: flex; gap: 6px; }
+.about-tabs button { font: 10px var(--f-mono); letter-spacing: .18em; color: var(--dim); padding: 5px 12px;
+  background: var(--plate); clip-path: var(--slant); }
+.about-tabs button.on { color: var(--bg); background: var(--accent); }
+.about-text { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 12px 16px; background: var(--grid);
+  font: 11px/1.6 var(--f-mono); color: var(--dim); white-space: pre-wrap; word-break: break-word; user-select: text; }
+.about-text::-webkit-scrollbar { width: 6px; }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 .pick-head { display: flex; align-items: center; justify-content: space-between; }
 .pick-head > div:first-child { display: flex; align-items: center; gap: 9px; }

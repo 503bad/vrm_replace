@@ -1,0 +1,99 @@
+{
+  "name": "replace2vrm",
+  "productName": "Replace2VRM",
+  "version": "1.0.0",
+  "description": "Replace a person in a video with a VRM avatar",
+  "author": "Igarashi Date/503 bad gateway",
+  "license": "Apache-2.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "fetch-uv": "node scripts/fetch-uv.js",
+    "dist": "node scripts/fetch-uv.js && node scripts/stage-render.js && electron-builder --win --x64",
+    "prepare-build": "node scripts/fetch-uv.js && node scripts/stage-render.js"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.503badgateway.replace2vrm",
+    "productName": "Replace2VRM",
+    "copyright": "Copyright 2026 Igarashi Date/503 bad gateway",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "render.js",
+      "gpu.js",
+      "setup.js",
+      "preload.js",
+      "setup.html",
+      "package.json",
+      "build/icon.png"
+    ],
+    "asar": true,
+    "afterPack": "scripts/after-pack.js",
+    "extraResources": [
+      {
+        "from": "..",
+        "to": "vrm_replace",
+        "filter": [
+          "common.py",
+          "run.py",
+          "setup_env.py",
+          "config.yaml",
+          "requirements.txt",
+          "LICENSE",
+          "NOTICE",
+          "THIRD_PARTY_NOTICES.md",
+          "stages/*.py",
+          "app/*.py",
+          "app/ui/**",
+          "render/package.json",
+          "render/page.html",
+          "render/renderer.js",
+          "render/server.js",
+          "!**/__pycache__/**",
+          "!**/*.map",
+          "!**/*.d.ts",
+          "!**/*.ts"
+        ]
+      },
+      {
+        "from": "vendor/render_modules",
+        "to": "vrm_replace/render/node_modules"
+      },
+      {
+        "from": "vendor/uv",
+        "to": "uv"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": true,
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Replace2VRM",
+      "artifactName": "Replace2VRM-setup-${version}.exe",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
+    }
+  }
+}

@@ -136,6 +136,25 @@
   - SAM 2 / RAFT / LaMa のモデルと SAM 2 の取得・導入をセットアップから削除。torch は残す（クリーンプレートの GPU 処理）。torchvision は不要に
   - 残課題: 品質優先の一部フレームで、頭の上の空に小さな黒い点が残る（髪の色を運んだか、キーフレームの穴埋め由来。未調査）
 
+### 配布用 exe（Electron 版）（feature/biz_fix, 2026-11-08）
+
+- `electron/`: Electron 45 + electron-builder（NSIS）。画面は `app/ui` をそのまま使う（`preload.js` が `window.pywebview.api` と同じ形を用意）
+- 処理側は Python のまま。`electron/main.js` が `app/bridge.py` を子プロセスで起動し、標準入出力（1 行 1 JSON）で `app/backend.py` の Api を呼ぶ。
+  ファイル選択ダイアログとドロップのパス取得（`webUtils.getPathForFile`）だけ Electron 側
+- 書き込み先は `common.DATA`（環境変数 `VRM_REPLACE_DATA`。配布版は `%LOCALAPPDATA%\Replace2VRM`、開発時はプロジェクト）。
+  コード（`resources/vrm_replace`）とモデル・作業ファイル・ログ・設定を分けた
+- 初回起動: `electron/setup.js` が同梱の uv で venv（Python 3.12、uv が公式ビルドを取得）を作り、`setup_env.py --app` を実行
+  （pip の代わりに uv、Node・Chrome の手順は飛ばす、pywebview は入れない）。2 回目以降は `.setup_done` のハッシュで即終了
+- レンダー: `Replace2VRM.exe --render ...`（`electron/render.js`）を `stages/s4_render.py` が呼ぶ（環境変数 `VRM_REPLACE_ELECTRON`）。
+  page.html / renderer.js は Puppeteer 版と共通（共有部分は `render/server.js`）。30 フレームで Puppeteer 版と画素単位で一致、速度は約 3 倍
+- Electron（Windows の GUI アプリ）は親から受け継いだ標準出力に書けないので、s4_render.py はパイプで受けて中継する
+- ffmpeg.dll は特許のある形式を含まない公式版に差し替え（`scripts/after-pack.js`）。LGPL-2.1 のため、対応するソース（Chromium DEPS の ffmpeg_revision の tarball + Electron の patches/ffmpeg）も同じスクリプトが取得して `resources/third_party_sources/ffmpeg` に同梱。uv は `scripts/fetch-uv.js` が SHA-256 を照合して取得
+- 出力形式（2026-11-08）: mp4 に固定。映像は AV1（av1_nvenc が使える GPU）か VP9（libvpx-vp9）、音声は Opus。H.264 / AAC（特許のライセンス条件あり）は使わない（ユーザー決定）。画質は `video_quality`。AV1 / VP9 とも完了画面のプレビュー（OpenCV）で読めることを確認
+- ffmpeg 9 で `-vsync` が削除されたため、s0 は `-fps_mode passthrough` を使う（配布版は imageio-ffmpeg の最新 = ffmpeg 9.0.2 が入る）
+- 確認用: 環境変数 `VRM_REPLACE_SELFTEST=<フォルダ>`（+ `VRM_REPLACE_SELFTEST_FILES`、`VRM_REPLACE_SELFTEST_RUN=x,y`）で
+  画面を出さずに起動し、画面の画像と結果を保存して終わる。`VRM_REPLACE_PYTHON` で既存の Python を使い、初回導入を飛ばせる
+- 未確認: 新しい PC での初回導入（uv での Python・PyTorch の導入）、インストーラーでのインストール・アンインストール
+
 ## 設計上の決定事項
 
 1. 工程は別プロセス。終了で VRAM 解放。16GB を各工程がフルに使ってよい

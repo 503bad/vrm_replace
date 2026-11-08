@@ -12,3 +12,8 @@ gui_settings.json
 .setup_done
 igarashi_refine2_UE58_TEXTURE1.2_5_subtle_outline.vrm
 ai-v.vrm
+# Electron 版（配布用 exe）のビルド
+electron/node_modules/
+electron/dist/
+electron/vendor/
+electron-profile/

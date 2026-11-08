@@ -13,9 +13,19 @@ import time
 from pathlib import Path
 
 from . import media
+from common import DATA  # noqa: E402
+
+# ライセンス画面のクレジットのリンク（画面から開けるのはこの 2 つだけ）
+CREDIT_LINKS = {
+    "x": "https://x.com/@503_bad",
+    "youtube": "https://youtube.com/@503badgateway",
+}
+LICENSE_DOCS = (("NOTICE", "NOTICE"), ("THIRD PARTY", "THIRD_PARTY_NOTICES.md"), ("LICENSE", "LICENSE"))
 
 ROOT = Path(__file__).resolve().parents[1]
-SETTINGS = ROOT / "gui_settings.json"
+SETTINGS = DATA / "gui_settings.json"
+# 出力の既定の置き場所（配布版はユーザーの「ビデオ」フォルダ。Electron が環境変数で渡す）
+OUT_DIR = Path(os.environ.get("VRM_REPLACE_OUT") or ROOT / "out")
 DEFAULTS = {
     "video": "", "vrm": "", "out": "", "out_auto": True,
     "preset": "quality", "joint_limits": True, "hand_interpolate": True, "fingers": True,
@@ -123,30 +133,40 @@ class Api:
             out["partial"] = self._partial
             return out
 
+    def dialog_info(self, kind):
+        """ファイル選択ダイアログの初期フォルダとファイル名（kind: video / vrm / out）"""
+        if kind == "out":
+            cur = Path(self._s["out"]) if self._s.get("out") else OUT_DIR / "result.mp4"
+            cur.parent.mkdir(parents=True, exist_ok=True)
+            return {"dir": str(cur.parent), "name": cur.name}
+        cur = self._s.get(kind)
+        return {"dir": str(Path(cur).parent) if cur and Path(cur).parent.exists() else str(Path.home()), "name": ""}
+
     def pick(self, kind):
+        """pywebview 版のファイル選択（Electron 版は electron/main.js がダイアログを出して set_file を呼ぶ）"""
         import webview
         types = {"video": ("動画 (*.mp4;*.mov;*.avi;*.mkv;*.webm;*.m4v)",),
                  "vrm": ("VRM (*.vrm)",)}[kind]
-        cur = self._s.get(kind)
-        d = str(Path(cur).parent) if cur and Path(cur).parent.exists() else str(ROOT)
-        r = self._window.create_file_dialog(webview.FileDialog.OPEN, directory=d, file_types=types)
+        r = self._window.create_file_dialog(webview.FileDialog.OPEN, directory=self.dialog_info(kind)["dir"],
+                                            file_types=types)
         if r:
             self.set_file(r[0])
 
     def pick_output(self):
         import webview
-        cur = Path(self._s["out"]) if self._s.get("out") else ROOT / "out" / "result.mp4"
-        cur.parent.mkdir(parents=True, exist_ok=True)
-        r = self._window.create_file_dialog(webview.FileDialog.SAVE, directory=str(cur.parent),
-                                            save_filename=cur.name, file_types=("mp4 (*.mp4)",))
+        d = self.dialog_info("out")
+        r = self._window.create_file_dialog(webview.FileDialog.SAVE, directory=d["dir"],
+                                            save_filename=d["name"], file_types=("mp4 (*.mp4)",))
         if r:
-            p = r if isinstance(r, str) else r[0]
-            if not p.lower().endswith(".mp4"):
-                p += ".mp4"
-            with self._lock:
-                self._s["out"], self._s["out_auto"] = p, False
-                self._save()
-                self._bump()
+            self.set_output(r if isinstance(r, str) else r[0])
+
+    def set_output(self, p):
+        if not p.lower().endswith(".mp4"):
+            p += ".mp4"
+        with self._lock:
+            self._s["out"], self._s["out_auto"] = p, False
+            self._save()
+            self._bump()
 
     def set_file(self, path):
         """ドロップ・選択されたファイルを種類（拡張子）で振り分ける"""
@@ -173,7 +193,7 @@ class Api:
             self._files[kind], self._errors[kind] = info, err
             self._s[kind] = str(path) if info else self._s.get(kind, "")
             if kind == "video" and info and (self._s.get("out_auto", True) or not self._s.get("out")):
-                self._s["out"] = str(ROOT / "out" / (Path(path).stem + "_vrm.mp4"))
+                self._s["out"] = str(OUT_DIR / (Path(path).stem + "_vrm.mp4"))
                 self._s["out_auto"] = True
             if self._job["phase"] in ("done", "failed", "stopped"):
                 self._job = self._new_job("idle")
@@ -261,6 +281,21 @@ class Api:
         if p and Path(p).exists():
             os.startfile(p)
 
+    def licenses(self):
+        """ライセンス画面に出す文書（本体の NOTICE、サードパーティ、Apache-2.0 本文）"""
+        docs = []
+        for label, name in LICENSE_DOCS:
+            p = ROOT / name
+            docs.append({"label": label, "name": name,
+                         "text": p.read_text(encoding="utf-8") if p.exists() else f"{name} が見つかりません"})
+        return {"docs": docs}
+
+    def open_link(self, key):
+        import webbrowser
+        url = CREDIT_LINKS.get(key)
+        if url:
+            webbrowser.open(url)
+
     def open_folder(self):
         p = self._s.get("out")
         if p and Path(p).exists():
@@ -281,7 +316,7 @@ class Api:
 
     # ------------------------------------------------------------ process
     def _work(self):
-        return ROOT / "work" / Path(self._s["video"]).stem
+        return DATA / "work" / Path(self._s["video"]).stem
 
     def _args(self, until0=False):
         s = self._s

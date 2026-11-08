@@ -64,7 +64,7 @@ def main():
         # SAM2 は jpg 連番を要求する
         subprocess.run([
             ff, "-y", "-loglevel", "error", "-i", str(a.video),
-            "-vf", f"select='between(n\\,{s}\\,{e - 1})'", "-vsync", "0",
+            "-vf", f"select='between(n\\,{s}\\,{e - 1})'", "-fps_mode", "passthrough",
             "-q:v", "2", "-start_number", "0", str(fr / "%06d.jpg"),
         ], check=True)
         got = len(list(fr.glob("*.jpg")))

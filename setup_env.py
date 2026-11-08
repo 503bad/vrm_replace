@@ -4,6 +4,9 @@
   python setup_env.py            # 足りないものだけ導入（冪等）。前回完了時から変更が無ければ即終了
   python setup_env.py --check    # 状態表示のみ（不足があれば終了コード 1）
   python setup_env.py --force    # 全項目を再確認・再導入
+  python setup_env.py --app      # 配布版（Electron）用。electron/main.js が初回起動時などに呼ぶ
+                                 #   pip の代わりに同梱の uv（環境変数 VRM_REPLACE_UV）で入れ、Node・Chrome の手順は飛ばす
+                                 #   （レンダーは Electron が担う）。書き込み先は環境変数 VRM_REPLACE_DATA
 
 導入するもの（すべてプロジェクト内 or pip）:
   1. PyTorch (CUDA 12.8 版)              pip。無い場合のみ。約 3GB のダウンロード
@@ -26,8 +29,12 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-LOGS = ROOT / "logs"
-STAMP = ROOT / ".setup_done"
+# 書き込む場所（common.DATA と同じ。この時点では yaml が無いかもしれないので common は読み込まない）
+DATA = Path(os.environ.get("VRM_REPLACE_DATA") or ROOT).resolve()
+LOGS = DATA / "logs"
+STAMP = DATA / ".setup_done"
+UV = os.environ.get("VRM_REPLACE_UV") or ""
+APP = False     # --app（配布版）なら True
 
 TORCH_INDEX = "https://download.pytorch.org/whl/cu128"
 MODELS = {
@@ -69,6 +76,32 @@ def sh(cmd, cwd=None, env=None):
     if env:
         e.update(env)
     subprocess.run([str(c) for c in cmd], cwd=cwd, env=e, check=True)
+
+
+def pip(*args):
+    """pip install / uninstall。配布版は同梱の uv を使う（速く、この Python の環境に pip が無くてよい）"""
+    py = sys.executable
+    if UV:
+        args = ["--reinstall" if a == "--force-reinstall" else a for a in args if a != "-y"]
+        sh([UV, "pip", args[0], "--python", py] + list(args[1:]))
+    else:
+        sh([py, "-m", "pip"] + list(args))
+
+
+def requirements_file():
+    """配布版では pywebview（pywebview 版の GUI 用）を除いた requirements を使う"""
+    src = ROOT / "requirements.txt"
+    if not APP:
+        return src
+    LOGS.mkdir(parents=True, exist_ok=True)
+    dst = LOGS / "requirements_app.txt"
+    dst.write_text("".join(l for l in src.read_text(encoding="utf-8").splitlines(True)
+                           if l.strip() != "pywebview"), encoding="utf-8")
+    return dst
+
+
+def py_modules():
+    return tuple(m for m in PY_MODULES if not (APP and m == "webview"))
 
 
 def have(mod):
@@ -134,15 +167,17 @@ def check(verbose=True):
              cuda, "CUDA 版 torch が必要（NVIDIA ドライバを確認）")
     except Exception:
         item("torch", False, "未導入")
-    for m in PY_MODULES:
+    for m in py_modules():
         item(f"python module: {m}", have(m))
     for rel in MODELS:
-        item(rel, (ROOT / rel).exists())
+        item(rel, (DATA / rel).exists())
     # 警告のみ（無くても Telea で動く）。opencv-python と opencv-contrib-python が両方あると上書きし合い、contrib が消える
     if verbose and not opencv_contrib_ok():
         log("  [!!] OpenCV contrib（cv2.xphoto.inpaint）が無効です。クリーンプレートの穴埋めが Telea（にじみやすい）になります")
         log("       直し方: python -m pip uninstall -y opencv-python opencv-python-headless && "
             "python -m pip install --force-reinstall --no-deps opencv-contrib-python")
+    if APP:     # 配布版: レンダーは Electron、GPU は起動時に Electron が確認済み
+        return ok
     item(f"node ({shutil.which('node') or 'not found'})", shutil.which("node"), "Node.js LTS を https://nodejs.org/ から導入")
     item("render/node_modules", (ROOT / "render" / "node_modules" / "puppeteer").exists())
     item("nvidia-smi（GPU ドライバ）", shutil.which("nvidia-smi"), "NVIDIA GPU とドライバが必要")
@@ -167,25 +202,29 @@ def ensure(force=False):
     except Exception:
         log("  torch が無いので CUDA 12.8 版を導入します（約 3GB のダウンロード。時間がかかります）")
     if not torch_ok or force:
-        sh([py, "-m", "pip", "install", "--upgrade", "torch", "--index-url", TORCH_INDEX])
+        log("  PyTorch（CUDA 12.8 版、約 3GB）をダウンロードしています。回線によっては数十分かかります")
+        pip("install", "--upgrade", "torch", "--index-url", TORCH_INDEX)
 
     # 2. requirements
-    missing = [m for m in PY_MODULES if not have(m)]
+    missing = [m for m in py_modules() if not have(m)]
     if missing or force:
         log(f"  pip: requirements.txt を導入（不足: {missing or 'none'}）")
-        sh([py, "-m", "pip", "install", "-r", ROOT / "requirements.txt"])
+        pip("install", "-r", requirements_file())
     # scenedetect などが opencv-python を引き込むと contrib 版（穴埋めの ShiftMap）が上書きされて消えるので入れ直す
     if not opencv_contrib_ok():
         log("  OpenCV: opencv-python / -headless が contrib 版を上書きしているので、contrib 版を入れ直します")
-        sh([py, "-m", "pip", "uninstall", "-y", "opencv-python", "opencv-python-headless"])
-        sh([py, "-m", "pip", "install", "--force-reinstall", "--no-deps", "opencv-contrib-python"])
+        pip("uninstall", "-y", "opencv-python", "opencv-python-headless")
+        pip("install", "--force-reinstall", "--no-deps", "opencv-contrib-python")
 
     # 3. モデル
     for rel, url in MODELS.items():
-        p = ROOT / rel
+        p = DATA / rel
         if p.exists() and not force:
             continue
         download(url, p)
+
+    if APP:     # 配布版: Node・Chrome は使わない（レンダーは Electron）
+        return
 
     # 4. Node
     if not shutil.which("node"):
@@ -206,7 +245,10 @@ def main():
     ap.add_argument("--check", action="store_true", help="状態表示のみ")
     ap.add_argument("--force", action="store_true", help="全項目を再確認・再導入")
     ap.add_argument("--ensure", action="store_true", help="（既定と同じ）足りないものだけ導入")
+    ap.add_argument("--app", action="store_true", help="配布版（Electron）用の導入")
     a = ap.parse_args()
+    global APP
+    APP = a.app
 
     if a.check:
         sys.exit(0 if check() else 1)
@@ -216,7 +258,7 @@ def main():
         log("setup: up to date")
         return
 
-    LOGS.mkdir(exist_ok=True)
+    LOGS.mkdir(parents=True, exist_ok=True)
     with open(LOGS / "setup.log", "a", encoding="utf-8") as f:
         sys.stdout = Tee(sys.__stdout__, f)
         try:

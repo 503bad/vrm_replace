@@ -9,6 +9,10 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parent
+# 書き込む場所（モデル・作業ファイル・ログ・設定）。配布版（Electron）はコードと分けて %LOCALAPPDATA%\Replace2VRM に置く
+DATA = Path(os.environ.get("VRM_REPLACE_DATA") or ROOT).resolve()
+# 配布版では Electron の exe が three-vrm のレンダー（工程 4）を担う（Node.js と Chrome が要らない）
+ELECTRON_EXE = os.environ.get("VRM_REPLACE_ELECTRON") or ""
 
 
 OPTIONS_FILE = "options.json"
@@ -45,10 +49,10 @@ def load_config(work=None):
     cfg["preset"] = name
     for k, v in presets[name].items():
         cfg.setdefault(k, v)
-    # 相対パスはプロジェクトルート基準に解決
+    # 相対パスは書き込み先（開発時はプロジェクトルート）基準に解決
     for k in PATH_KEYS:
         if k in cfg and cfg[k] and not Path(cfg[k]).is_absolute():
-            cfg[k] = str((ROOT / cfg[k]).resolve())
+            cfg[k] = str((DATA / cfg[k]).resolve())
     return cfg
 
 

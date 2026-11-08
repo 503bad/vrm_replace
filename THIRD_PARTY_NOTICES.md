@@ -1,6 +1,7 @@
 # Third-party notices / サードパーティのライセンス
 
-vrm_replace 本体は Apache License 2.0（`LICENSE`）です。
+Replace2VRM（vrm_replace）本体は Apache License 2.0（`LICENSE`）です。
+Copyright 2026 Igarashi Date/503 bad gateway（X: https://x.com/@503_bad / YouTube: https://youtube.com/@503badgateway。`NOTICE`）
 以下はこのリポジトリに **同梱していない** が、`run.cmd`（`setup_env.py`）が利用者の環境に取得・導入する
 ソフトウェアとモデルです。それぞれのライセンスは各配布元の条件に従います。
 
@@ -20,6 +21,22 @@ vrm_replace 本体は Apache License 2.0（`LICENSE`）です。
 | [pywebview](https://github.com/r0x0r/pywebview)（+ pythonnet / clr_loader / bottle / proxy_tools） | GUI のウィンドウ | BSD-3-Clause（依存は MIT） | pip |
 | Microsoft Edge WebView2 ランタイム | GUI の描画 | Microsoft のライセンス（Windows に標準搭載、同梱しない） | OS |
 
+### 配布用 exe（Electron 版）に同梱するもの
+
+配布用 exe（`electron/`）には次のものだけを同梱します。Python・PyTorch・MediaPipe・OpenCV・ffmpeg（imageio-ffmpeg）・
+モデルは同梱せず、上の表のとおり初回起動時に各配布元から利用者の環境（`%LOCALAPPDATA%\Replace2VRM`）へ取得します。
+Node.js・Puppeteer・Chrome for Testing は使いません（レンダーは Electron が行います）。
+
+| コンポーネント | 用途 | ライセンス | 同梱物の中のライセンス文 |
+|---|---|---|---|
+| [Electron](https://github.com/electron/electron) | アプリのウィンドウ、VRM のレンダー | MIT（同梱の Chromium・Node.js などは各ライセンス） | `LICENSE.electron.txt`、`LICENSES.chromium.html` |
+| Electron の ffmpeg.dll（特許のある形式を含まない版） | Chromium の動作に必要な部品（このアプリは動画を再生しない） | LGPL-2.1 | `LICENSES.chromium.html`。対応するソースコードを `resources/third_party_sources/ffmpeg/` に同梱 |
+| [uv](https://github.com/astral-sh/uv) | 初回起動時に Python と依存パッケージを導入 | MIT または Apache-2.0 | `resources/uv/LICENSE-MIT`、`LICENSE-APACHE` |
+| [three.js](https://github.com/mrdoob/three.js)、[@pixiv/three-vrm](https://github.com/pixiv/three-vrm) | VRM のレンダー | MIT | `resources/vrm_replace/render/node_modules/*/LICENSE` |
+
+ffmpeg.dll は、Electron が公式に配布している「H.264 / AAC など特許のある形式を含まない版」に差し替えています（`electron/scripts/after-pack.js`）。
+LGPL-2.1 の条件に従い、その元になったソースコード（Electron が使う Chromium の DEPS で固定された FFmpeg のリビジョンと、Electron が当てているパッチ）を配布物に同梱しています（`resources/third_party_sources/ffmpeg/README.txt` に入手元とリビジョンを記載）。ffmpeg.dll は別のファイルなので、利用者が自分でビルドしたものに差し替えられます。
+
 ## 商用利用について
 
 既定の構成（上の表）は、コードと重みがいずれも商用利用を許すライセンスで配布されているものだけを使います。
@@ -32,6 +49,7 @@ vrm_replace 本体は Apache License 2.0（`LICENSE`）です。
   - 学習データを使わない処理: NVIDIA Optical Flow（ハードウェア）、OpenCV（Telea / ShiftMap）
 - **NVIDIA Optical Flow**: NVIDIA は「商用アプリを含むあらゆるアプリで無料」としています。実行部分はドライバーに含まれ、
   このリポジトリは SDK を同梱・配布しません（公開ヘッダー（BSD-3）に合わせた定義を `stages/nvof.py` に書いています）。
+- **出力動画の形式**: 出力は mp4（映像 AV1 か VP9、音声 Opus）です。いずれも規格の推進団体が特許料を求めない方針で提供している形式で、特許のライセンス条件がある H.264 / AAC は使いません。
 - **SMPL 系のモーキャプ**: `mocap_backend: smpl_npz` / `gvhmr` は外部で作った SMPL の結果を読みます。
   SMPL モデルとそれを使う推定器（GVHMR など）は多くが非商用ライセンスです。既定の `mediapipe` は該当しません。
 - 以前のバージョンで使っていた ProPainter（S-Lab License 1.0、非商用）は使わなくなりました。
