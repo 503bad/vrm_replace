@@ -30,12 +30,12 @@ Node.js・Puppeteer・Chrome for Testing は使いません（レンダーは El
 | コンポーネント | 用途 | ライセンス | 同梱物の中のライセンス文 |
 |---|---|---|---|
 | [Electron](https://github.com/electron/electron) | アプリのウィンドウ、VRM のレンダー | MIT（同梱の Chromium・Node.js などは各ライセンス） | `LICENSE.electron.txt`、`LICENSES.chromium.html` |
-| Electron の ffmpeg.dll（特許のある形式を含まない版） | Chromium の動作に必要な部品（このアプリは動画を再生しない） | LGPL-2.1 | `LICENSES.chromium.html`。対応するソースコードを `resources/third_party_sources/ffmpeg/` に同梱 |
+| Electron の ffmpeg.dll（H.264 / AAC のデコーダーを含まない版） | Chromium の動作に必要な部品（このアプリは動画を再生しない） | LGPL-2.1 | `LICENSES.chromium.html`。対応するソースコードを `resources/third_party_sources/ffmpeg/` に同梱 |
 | [uv](https://github.com/astral-sh/uv) | 初回起動時に Python と依存パッケージを導入 | MIT または Apache-2.0 | `resources/uv/LICENSE-MIT`、`LICENSE-APACHE` |
 | [three.js](https://github.com/mrdoob/three.js)、[@pixiv/three-vrm](https://github.com/pixiv/three-vrm) | VRM のレンダー | MIT | `resources/vrm_replace/render/node_modules/*/LICENSE` |
 
-ffmpeg.dll は、Electron が公式に配布している「H.264 / AAC など特許のある形式を含まない版」に差し替えています（`electron/scripts/after-pack.js`）。
-LGPL-2.1 の条件に従い、その元になったソースコード（Electron が使う Chromium の DEPS で固定された FFmpeg のリビジョンと、Electron が当てているパッチ）を配布物に同梱しています（`resources/third_party_sources/ffmpeg/README.txt` に入手元とリビジョンを記載）。ffmpeg.dll は別のファイルなので、利用者が自分でビルドしたものに差し替えられます。
+ffmpeg.dll は、Electron の公式リリースにある ffmpeg.dll（H.264 / AAC のデコーダーを含まない版）に差し替えています（`electron/scripts/after-pack.js`）。これは ffmpeg.dll 単体についてのことで、Electron 本体は Windows や GPU のデコード機能を使ってH.264 の動画を再生できます。このアプリは画面で動画を再生しません。
+LGPL-2.1 の条件に従い、その元になったソースコード（Electron が使う Chromium の DEPS で固定された FFmpeg のリビジョンと、Electron が当てているパッチ。Chromium 用のビルド設定を含む）を配布物に同梱しています。入手元・リビジョンと、ビルドに使う Chromium・Electron のビルドの仕組みの入手先は `resources/third_party_sources/ffmpeg/README.txt` にあります。ffmpeg.dll は別のファイルなので、利用者が自分でビルドしたものに差し替えられます。
 
 ## 商用利用について
 

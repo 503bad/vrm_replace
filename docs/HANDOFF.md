@@ -148,7 +148,7 @@
 - レンダー: `Replace2VRM.exe --render ...`（`electron/render.js`）を `stages/s4_render.py` が呼ぶ（環境変数 `VRM_REPLACE_ELECTRON`）。
   page.html / renderer.js は Puppeteer 版と共通（共有部分は `render/server.js`）。30 フレームで Puppeteer 版と画素単位で一致、速度は約 3 倍
 - Electron（Windows の GUI アプリ）は親から受け継いだ標準出力に書けないので、s4_render.py はパイプで受けて中継する
-- ffmpeg.dll は特許のある形式を含まない公式版に差し替え（`scripts/after-pack.js`）。LGPL-2.1 のため、対応するソース（Chromium DEPS の ffmpeg_revision の tarball + Electron の patches/ffmpeg）も同じスクリプトが取得して `resources/third_party_sources/ffmpeg` に同梱。uv は `scripts/fetch-uv.js` が SHA-256 を照合して取得
+- ffmpeg.dll は Electron 公式リリースの ffmpeg zip 版に差し替え（`scripts/after-pack.js`）。2026-11-08 に実測: 差し替え版は avcodec_find_decoder で H.264 / AAC が無い（元の版は両方あり）。ただし Electron 本体は Windows・GPU のデコードで H.264 を再生できる（GPU デコードを切っても再生できた）ので、「アプリが H.264 を含まない」とは書かないこと。LGPL-2.1 のため、対応するソース（Chromium DEPS の ffmpeg_revision の tarball + Electron の patches/ffmpeg）と、Chromium・Electron のビルドの仕組みの入手先を README.txt に書いて `resources/third_party_sources/ffmpeg` に同梱。uv は `scripts/fetch-uv.js` が SHA-256 を照合して取得
 - 出力形式（2026-11-08 改訂）: AV1 / VP9 は X や Premiere で読めなかったため（ユーザー確認）、出力ファイルの拡張子で選ぶ形にした。mp4 = H.264（h264_nvenc、`h264_cq`）/ AAC、mov = CineForm（cfhd、yuv422p10le）/ PCM。GUI の FORMAT。フレームレートは分数（30000/1001 など）で渡す（小数だとタイムベースが 979001 のような半端な値になっていた）。アプリは無償配布（有償販売しない、ユーザー決定）。H.264 / AAC の条件と利用者の責任は README の「利用上の注意」
 - ffmpeg 9 で `-vsync` が削除されたため、s0 は `-fps_mode passthrough` を使う（配布版は imageio-ffmpeg の最新 = ffmpeg 9.0.2 が入る）
 - 確認用: 環境変数 `VRM_REPLACE_SELFTEST=<フォルダ>`（+ `VRM_REPLACE_SELFTEST_FILES`、`VRM_REPLACE_SELFTEST_RUN=x,y`）で
