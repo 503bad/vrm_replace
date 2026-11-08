@@ -4,6 +4,19 @@
 
 *Replace a person in a video with a VRM avatar: click the person once, get an mp4. Windows + NVIDIA GPU. Pipeline: MediaPipe (person mask, body + finger mocap) → three-vrm in headless Chrome (render, spring bones) → NVIDIA Optical Flow (GPU hardware) + OpenCV inpainting (clean plate) → ffmpeg (composite). Two presets: quality (standard) / speed (lightweight). AI models are limited to ones whose weights and training data both allow commercial use (or whose training data is undisclosed and the weights allow commercial use).*
 
+## ダウンロード（最新版）
+
+**[最新版のインストーラーをダウンロード（GitHub Releases）](https://github.com/503bad/vrm_replace/releases/latest)**
+
+1. Releases のページで `Replace2VRM-setup-<バージョン>.exe` をダウンロードして実行します
+   （コード署名をしていないため「Windows によって PC が保護されました」と出たら、「詳細情報」→「実行」）
+2. 初回起動時に、Python・PyTorch・MediaPipe などを各配布元からダウンロードします（約 4GB。2 回目からはすぐ起動）
+3. 動画と VRM をウィンドウにドロップし、START を押して、置き換える人物をクリックします
+
+必要なもの: Windows 10 / 11（64bit）、**NVIDIA GPU（GeForce RTX 20 シリーズ以降）**。NVIDIA 以外の GPU では起動時に終了します。
+
+## ソースから動かす（開発者向け）
+
 ```
 git clone https://github.com/503bad/vrm_replace.git
 cd vrm_replace
@@ -12,9 +25,9 @@ run.cmd      ← ダブルクリックでも可
 
 1. `run.cmd` が Python / Node.js / NVIDIA ドライバを確認し、無ければ導入先を表示して止まります
 2. 初回は依存ライブラリと **再配布不可のモデル**（MediaPipe のモデル、Chrome）を自動で取得します（合計 1GB 程度、PyTorch が無い場合はさらに約 3GB）
-3. GUI が開くので、動画と VRM を「参照...」で選んで「実行」
-4. 最初のフレームが表示されるので、置き換える人物を **左クリック → Enter**（右クリックで除外点、`r` でやり直し）
-5. あとは放置。進捗は GUI のログに出ます。終わると出力先に mp4 ができます
+3. GUI が開くので、動画と VRM をウィンドウにドロップして START
+4. 最初のフレームが表示されるので、置き換える人物を **左クリック → 確定（Enter）**（右クリックで除外点、`R` でやり直し）
+5. あとは放置。進捗は画面に出ます。終わると出力先に mp4 ができます
 
 入力: mp4 / avi（ffmpeg が読めるものなら何でも）。3D モデル: VRM 1.0 / 0.x。
 
