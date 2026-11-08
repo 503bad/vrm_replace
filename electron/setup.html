@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Replace2VRM</title>
+<style>
+  :root { --bg: #0F1114; --plate: #15181D; --grid: #121418; --ink: #E9E7E1; --accent: #FF8A1F; --red: #E61E19;
+          --dim: rgba(233, 231, 225, .55); --hair: rgba(233, 231, 225, .08);
+          --slant: polygon(7px 0, 100% 0, calc(100% - 7px) 100%, 0 100%); }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 13px/1.5 "Yu Gothic UI", "Meiryo UI", sans-serif; }
+  body { display: flex; flex-direction: column; padding: 28px 32px; box-sizing: border-box; gap: 18px; user-select: none; }
+  .mono { font-family: Consolas, monospace; text-transform: uppercase; letter-spacing: .22em; }
+  .logo { font: 600 22px "Bahnschrift", "Segoe UI", sans-serif; letter-spacing: .04em; }
+  .sub { font-size: 9px; color: var(--dim); margin-top: 4px; }
+  .step { display: flex; align-items: center; gap: 12px; font-size: 15px; }
+  .mark { width: 3px; height: 14px; background: var(--accent); display: inline-block; }
+  .bar { height: 3px; background: var(--hair); overflow: hidden; position: relative; }
+  .bar i { position: absolute; top: 0; bottom: 0; width: 30%; background: var(--accent); animation: run 1.4s cubic-bezier(.16, 1, .3, 1) infinite; }
+  @keyframes run { from { left: -30%; } to { left: 100%; } }
+  .note { font-size: 12px; color: var(--dim); }
+  pre { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 10px 14px; background: var(--grid); color: var(--dim);
+        font: 11px/1.55 Consolas, monospace; white-space: pre-wrap; word-break: break-all; user-select: text; }
+  .err { display: none; color: var(--red); font-size: 13px; }
+  .btns { display: none; gap: 8px; }
+  button { border: 0; cursor: pointer; background: var(--plate); color: var(--ink); padding: 8px 22px; clip-path: var(--slant); font: 12px "Yu Gothic UI", sans-serif; }
+  button.accent { background: var(--accent); color: #16110b; font-weight: 600; }
+  body.failed .err, body.failed .btns { display: flex; }
+  body.failed .bar { display: none; }
+  body.failed .mark { background: var(--red); }
+</style>
+</head>
+<body>
+  <div>
+    <div class="logo">Replace2VRM</div>
+    <div class="sub mono">VIDEO PERSON &rarr; VRM AVATAR</div>
+  </div>
+  <div class="step"><span class="mark"></span><span id="step">起動しています</span></div>
+  <div class="bar"><i></i></div>
+  <div class="note">初回は Python・PyTorch・MediaPipe などを各配布元からダウンロードします（約 4GB。回線によっては数十分）。2 回目からはすぐ起動します。</div>
+  <div class="err" id="err"></div>
+  <div class="btns"><button class="accent" id="retry">再試行</button><button id="logs">ログのフォルダを開く</button></div>
+  <pre id="log"></pre>
+<script>
+  const $ = (s) => document.querySelector(s);
+  const log = $("#log");
+  vrmSetup.onStep((s) => { $("#step").textContent = s; });
+  vrmSetup.onLog((t) => {
+    const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+    log.textContent = (log.textContent + t).slice(-200000);
+    if (atEnd) log.scrollTop = log.scrollHeight;
+  });
+  vrmSetup.onError((m) => { document.body.classList.add("failed"); $("#err").textContent = m; $("#step").textContent = "セットアップできませんでした"; });
+  $("#retry").addEventListener("click", () => { document.body.classList.remove("failed"); $("#step").textContent = "再試行しています"; vrmSetup.retry(); });
+  $("#logs").addEventListener("click", () => vrmSetup.openLogs());
+</script>
+</body>
+</html>

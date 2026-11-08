@@ -207,6 +207,29 @@ function bind() {
   $("#btn-folder").addEventListener("click", () => api.open_folder());
   $("#btn-log").addEventListener("click", () => { $("#log").classList.toggle("open"); $("#btn-log").classList.toggle("on"); });
 
+  // ライセンス画面
+  const about = $("#ov-about");
+  const closeAbout = () => about.classList.remove("show");
+  $("#btn-about").addEventListener("click", async () => {
+    const r = await api.licenses(), tabs = $("#about-tabs");
+    tabs.innerHTML = "";
+    r.docs.forEach((d, i) => {
+      const b = document.createElement("button");
+      b.textContent = d.label;
+      b.addEventListener("click", () => {
+        tabs.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+        $("#about-text").textContent = d.text;
+        $("#about-text").scrollTop = 0;
+      });
+      tabs.appendChild(b);
+      if (i === 0) b.click();
+    });
+    about.classList.add("show");
+  });
+  $("#about-close").addEventListener("click", closeAbout);
+  about.querySelectorAll("[data-link]").forEach((b) => b.addEventListener("click", () => api.open_link(b.dataset.link)));
+  window.addEventListener("keydown", (e) => { if (e.key === "Escape" && about.classList.contains("show")) closeAbout(); });
+
   // ドラッグ中の表示（ドロップ自体は Python 側がフルパス付きで受け取る）
   // capture（true）で受けるのは、Python 側のドロップ処理より先に表示を戻すため
   const ov = $("#ov-drag");
@@ -244,7 +267,7 @@ function bind() {
     else if (e.key === "r" || e.key === "R") reset();
     else if (e.key === "Escape") api.stop();
   });
-  document.addEventListener("contextmenu", (e) => { if (!e.target.closest("#pick-frame") && !e.target.closest(".log")) e.preventDefault(); });
+  document.addEventListener("contextmenu", (e) => { if (!e.target.closest("#pick-frame") && !e.target.closest(".log") && !e.target.closest(".about-text")) e.preventDefault(); });
 }
 
 window.addEventListener("pywebviewready", async () => {

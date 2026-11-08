@@ -1,4 +1,4 @@
-# vrm_replace
+# Replace2VRM（vrm_replace）
 
 実写動画の人物を VRM キャラクターに置き換えるツール（Windows / NVIDIA GPU）。
 
@@ -78,6 +78,28 @@ python setup_env.py --check                    # 環境の状態確認
 python setup_env.py --force                    # 依存・モデルを再導入
 python tools/render_selftest.py --vrm x.vrm    # VRM を読んで 4 枚描画（GPU と座標系の確認。T ポーズ / 回転 / 腕上げ / 握り）
 ```
+
+## 配布用 exe（Electron 版）
+
+`electron/` で Windows のインストーラーを作れます。利用者は Python・Node.js を入れる必要がありません。
+
+```
+cd render && npm install          # three.js / three-vrm（exe に同梱する分）
+cd ../electron && npm install
+npm run dist                      # → electron/dist/Replace2VRM-setup-<version>.exe
+```
+
+- exe に入るのは Electron、uv、画面と Python のコード、three.js / three-vrm だけです（約 130MB）
+- 初回起動時に、同梱の uv が Python 3.12 を用意し、PyTorch・MediaPipe・OpenCV などと MediaPipe のモデルを各配布元から
+  `%LOCALAPPDATA%\Replace2VRM` にダウンロードします（約 4GB。2 回目からはすぐ起動）。出力の既定は「ビデオ」フォルダの `Replace2VRM`
+- レンダー（工程 4）は Electron の見えないウィンドウで行います（Node.js・Chrome は使いません）
+- NVIDIA 以外の GPU では起動時に「NVIDIA 以外の GPUは利用できません」と表示して終了します
+- コード署名はしていません。初回起動時に「Windows によって PC が保護されました」と出たら、「詳細情報」→「実行」を押してください
+- 開発中の確認: `cd electron && npm start`（プロジェクトのフォルダの Python 環境・モデルを使うには環境変数 `VRM_REPLACE_PYTHON` に python.exe を指定）
+
+## 出力の形式
+
+出力は mp4 です。映像は AV1（RTX 40 以降は GPU の NVENC で高速）か VP9（RTX 20 / 30、CPU）、音声は Opus です。いずれも特許料を求めない方針で提供されている形式で、特許のライセンス条件がある H.264 / AAC は使いません。画質は `config.yaml` の `video_quality`（小さいほど高画質）。
 
 ## 構成（工程ごとに別プロセス。落ちた工程から再開できる）
 
@@ -180,7 +202,12 @@ work/<video>/shot_000/
 
 ## ライセンス
 
-vrm_replace 本体は [Apache License 2.0](LICENSE) です。
+Replace2VRM（vrm_replace）本体は [Apache License 2.0](LICENSE) です。
+
+Copyright 2026 Igarashi Date/503 bad gateway（[NOTICE](NOTICE)）
+
+- X: https://x.com/@503_bad
+- YouTube: https://youtube.com/@503badgateway
 
 `run.cmd` が取得する MediaPipe、three-vrm などはそれぞれのライセンスに従います（[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）。
 AI モデルは、学習データの条件まで含めて商用利用できるものだけを使います（詳しくは THIRD_PARTY_NOTICES.md）。

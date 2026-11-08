@@ -1,5 +1,5 @@
 """
-vrm_replace の GUI（pywebview + WebView2）。
+Replace2VRM（vrm_replace）の GUI（pywebview + WebView2）。
 
   python gui.py          # run.cmd からは pythonw で起動される
 
@@ -20,7 +20,7 @@ def main():
     err = gpu_error()
     if err:
         import ctypes
-        ctypes.windll.user32.MessageBoxW(None, err, "vrm_replace", 0x10)   # MB_ICONERROR。pythonw なのでダイアログで知らせる
+        ctypes.windll.user32.MessageBoxW(None, err, "Replace2VRM", 0x10)   # MB_ICONERROR。pythonw なのでダイアログで知らせる
         sys.exit(1)
 
     import webview
@@ -30,7 +30,7 @@ def main():
 
     api = Api()
     window = webview.create_window(
-        "vrm_replace", url=str(ROOT / "app" / "ui" / "index.html"), js_api=api,
+        "Replace2VRM", url=str(ROOT / "app" / "ui" / "index.html"), js_api=api,
         width=1280, height=860, min_size=(1100, 720), background_color="#0F1114", text_select=False)
     api._window = window
 
@@ -45,7 +45,7 @@ def main():
 
     def on_closing():
         if api.is_busy():
-            if not window.create_confirmation_dialog("vrm_replace", "実行中です。停止して終了しますか？"):
+            if not window.create_confirmation_dialog("Replace2VRM", "実行中です。停止して終了しますか？"):
                 return False
             api.stop()
         return True

@@ -2,13 +2,13 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<title>vrm_replace</title>
+<title>Replace2VRM</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <header class="top">
   <div class="brand">
-    <div class="logo">vrm_replace</div>
+    <div class="logo">Replace2VRM</div>
     <div class="sub mono">
       <span>VIDEO PERSON &rarr; VRM AVATAR</span>
       <span>MEDIAPIPE / THREE-VRM / NVIDIA OPTICAL FLOW / OPENCV</span>
@@ -127,12 +127,32 @@
 
 <footer>
   <div class="status" id="status">準備ができたら START を押してください</div>
-  <button class="logbtn mono" id="btn-log">LOG</button>
+  <div class="foot-btns">
+    <button class="logbtn mono" id="btn-about">LICENSE</button>
+    <button class="logbtn mono" id="btn-log">LOG</button>
+  </div>
 </footer>
 <div class="log" id="log"><pre id="log-text"></pre></div>
 
 <div class="overlay drag" id="ov-drag">
   <div class="drag-box"><div class="mono big">DROP</div><div class="small">動画 / VRM（種類は自動で判別）</div></div>
+</div>
+
+<div class="overlay about" id="ov-about">
+  <div class="about-head">
+    <div><span class="mark"></span><span class="mono t">LICENSE</span></div>
+    <button class="plate sm" id="about-close">閉じる</button>
+  </div>
+  <div class="about-credit">
+    <div class="about-app">Replace2VRM <span class="dim">— Apache License 2.0</span></div>
+    <div class="about-by">© 2026 Igarashi Date/503 bad gateway</div>
+    <div class="about-links">
+      <button class="plate sm" data-link="x">X @503_bad</button>
+      <button class="plate sm" data-link="youtube">YouTube @503badgateway</button>
+    </div>
+  </div>
+  <div class="about-tabs" id="about-tabs"></div>
+  <pre class="about-text" id="about-text"></pre>
 </div>
 
 <div class="overlay pick" id="ov-pick">

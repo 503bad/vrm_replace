@@ -72,4 +72,6 @@ chrome_exe: ""               # 空なら Puppeteer 同梱の Chrome。GPU が効
 allow_software_gl: false     # true にすると SwiftShader（CPU）でも続行する
 
 # ---- 5 合成 ----
-crf: 18
+# 出力は mp4。映像は AV1（NVENC が AV1 に対応する GPU = RTX 40 以降）か VP9（それ以外、CPU）、音声は Opus。
+# いずれも特許料を求めない方針で提供されている形式（H.264 / AAC は特許のライセンス条件があるので使わない）
+video_quality: 26           # AV1 の cq / VP9 の crf（小さいほど高画質・大きいファイル）
