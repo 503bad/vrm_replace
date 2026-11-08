@@ -58,7 +58,9 @@ function startGui() {
     win = new BrowserWindow({
       width: 1280, height: 860, minWidth: 1100, minHeight: 720, backgroundColor: "#0F1114", title: "Replace2VRM", icon: path.join(__dirname, "build", "icon.png"),
       show: false, autoHideMenuBar: true, ...(SELFTEST ? { paintWhenInitiallyHidden: true } : {}),
-      webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, spellcheck: false },
+      // backgroundThrottling: 最小化中も進み具合の表示を止めない
+      webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, sandbox: true, spellcheck: false,
+                        backgroundThrottling: false },
     });
     Menu.setApplicationMenu(null);
     if (!SELFTEST) win.once("ready-to-show", () => win.show());
@@ -147,7 +149,7 @@ function startGui() {
     if (method === "pick_output") {
       const info = await bridge.call("dialog_info", ["out"]);
       const r = await dialog.showSaveDialog(win, { defaultPath: path.join(info.dir, info.name),
-                                                   filters: [{ name: "mp4", extensions: ["mp4"] }] });
+                                                   filters: [{ name: info.ext, extensions: [info.ext] }] });
       if (!r.canceled && r.filePath) return bridge.call("set_output", [r.filePath]);
       return null;
     }
@@ -175,7 +177,8 @@ function startGui() {
   async function selftest() {
     const out = SELFTEST, wait = (ms) => new Promise((r) => setTimeout(r, ms));
     const shot = async (name) => fs.writeFileSync(path.join(out, name), (await win.webContents.capturePage()).toPNG());
-    const res = {};
+    const res = { console: [] };
+    win.webContents.on("console-message", (e) => res.console.push(`${e.level}: ${e.message} (${e.sourceId}:${e.lineNumber})`));
     try {
       fs.mkdirSync(out, { recursive: true });
       await wait(2500);
@@ -193,6 +196,7 @@ function startGui() {
       if (pt.length === 2) {     // START → 人物を選ぶ → 完了まで（VRM_REPLACE_SELFTEST_RUN=x,y）
         await win.webContents.executeJavaScript('document.querySelector("#about-close").click()');
         await bridge.call("set_option", ["max_frames", 60]);
+        if (process.env.VRM_REPLACE_SELFTEST_FORMAT) await bridge.call("set_option", ["output_format", process.env.VRM_REPLACE_SELFTEST_FORMAT]);
         res.start = await bridge.call("start");
         const phase = async () => (await bridge.call("init")).state.job;
         let j;
