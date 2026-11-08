@@ -1,7 +1,7 @@
 {
   "name": "replace2vrm",
   "productName": "Replace2VRM",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Replace a person in a video with a VRM avatar",
   "author": "Igarashi Date/503 bad gateway",
   "license": "Apache-2.0",

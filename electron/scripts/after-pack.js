@@ -1,4 +1,5 @@
-// electron-builder の afterPack: ffmpeg.dll を、H.264 / AAC などの特許のある形式を含まない版に差し替える。
+// electron-builder の afterPack: ffmpeg.dll を、H.264 / AAC のデコーダーを含まない版に差し替える。
+// （ffmpeg.dll 単体の話。Electron 本体は Windows・GPU のデコード機能で H.264 を再生できる。2026-11-08 に実測）
 // このアプリは画面で動画を再生しない（サムネイルは Python 側で静止画にしている）ので、差し替えても影響はない。
 // 差し替え用の ffmpeg.dll は Electron の公式リリースにある ffmpeg-v<version>-win32-x64.zip（SHASUMS256.txt と照合）。
 "use strict";
@@ -38,7 +39,7 @@ exports.default = async function afterPack(context) {
   if (!fs.existsSync(dll)) throw new Error(`${name} に ffmpeg.dll がありません`);
   fs.copyFileSync(dll, path.join(context.appOutDir, "ffmpeg.dll"));
   fs.rmSync(tmp, { recursive: true, force: true });
-  console.log("  • ffmpeg.dll replaced (no proprietary codecs)");
+  console.log("  • ffmpeg.dll replaced (no H.264 / AAC decoders)");
   await bundleFfmpegSource(context, version, cacheDir);
 };
 
@@ -72,8 +73,9 @@ async function bundleFfmpegSource(context, version, cacheDir) {
   fs.writeFileSync(path.join(out, "README.txt"), [
     "Source code of ffmpeg.dll (FFmpeg, GNU Lesser General Public License v2.1)",
     "",
-    `ffmpeg.dll in this application is the official Electron v${version} build without proprietary codecs`,
+    `ffmpeg.dll in this application is the ffmpeg.dll published with the official Electron v${version} release`,
     `(https://github.com/electron/electron/releases/download/v${version}/ffmpeg-v${version}-win32-x64.zip).`,
+    "It does not contain the H.264 and AAC decoders (the ffmpeg.dll bundled with Electron by default does).",
     "It is built from the following source code, included in this folder:",
     "",
     `  ${tarName}`,
@@ -82,6 +84,13 @@ async function bundleFfmpegSource(context, version, cacheDir) {
     "  electron-patches/",
     `    Patches applied by Electron v${version} (https://github.com/electron/electron/tree/v${version}/patches/ffmpeg),`,
     "    in the order listed in .patches.",
+    "",
+    "The archive includes Chromium's build configuration for FFmpeg (BUILD.gn, ffmpeg_generated.gni,",
+    "ffmpeg_options.gni, chromium/config/Chromium/win/x64/). The rest of the build system used to compile it",
+    `(GN build files and toolchain of Chromium ${chrome}) is available from the Chromium source code:`,
+    `  https://chromium.googlesource.com/chromium/src/+/refs/tags/${chrome}`,
+    `  (build instructions: https://chromium.googlesource.com/chromium/src/+/refs/tags/${chrome}/docs/windows_build_instructions.md)`,
+    `and Electron's build setup: https://github.com/electron/electron/tree/v${version} (docs/development/build-instructions-gn.md).`,
     "",
     "The license texts are in the archive (COPYING.LGPLv2.1, LICENSE.md) and in LICENSES.chromium.html.",
     "You may replace ffmpeg.dll with your own build of this library.",
