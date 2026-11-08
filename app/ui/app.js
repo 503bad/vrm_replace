@@ -63,7 +63,8 @@ function renderFiles(s) {
 
 function renderSettings(s) {
   const st = s.settings;
-  $$(".mode").forEach((b) => b.classList.toggle("on", b.dataset.preset === st.preset));
+  $$(".mode[data-preset]").forEach((b) => b.classList.toggle("on", b.dataset.preset === st.preset));
+  $$(".mode[data-format]").forEach((b) => b.classList.toggle("on", b.dataset.format === (st.output_format || "mp4")));
   $$(".tog").forEach((b) => b.classList.toggle("on", !!st[b.dataset.opt]));
   if (document.activeElement !== $("#max-frames")) $("#max-frames").value = st.max_frames || 0;
   $("#from-stage").value = String(st.from_stage || 0);
@@ -193,7 +194,8 @@ function bind() {
     $(".x", el).addEventListener("click", (e) => { e.stopPropagation(); api.clear_file(kind); });
   }
   $("#btn-out").addEventListener("click", () => api.pick_output());
-  $$(".mode").forEach((b) => b.addEventListener("click", () => api.set_option("preset", b.dataset.preset)));
+  $$(".mode[data-preset]").forEach((b) => b.addEventListener("click", () => api.set_option("preset", b.dataset.preset)));
+  $$(".mode[data-format]").forEach((b) => b.addEventListener("click", () => api.set_option("output_format", b.dataset.format)));
   $$(".tog").forEach((b) => b.addEventListener("click", () => api.set_option(b.dataset.opt, !b.classList.contains("on"))));
   $("#max-frames").addEventListener("change", (e) => api.set_option("max_frames", Math.max(0, parseInt(e.target.value) || 0)));
   $("#from-stage").addEventListener("change", (e) => api.set_option("from_stage", parseInt(e.target.value) || 0));

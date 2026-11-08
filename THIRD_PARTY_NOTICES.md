@@ -49,7 +49,7 @@ LGPL-2.1 の条件に従い、その元になったソースコード（Electron
   - 学習データを使わない処理: NVIDIA Optical Flow（ハードウェア）、OpenCV（Telea / ShiftMap）
 - **NVIDIA Optical Flow**: NVIDIA は「商用アプリを含むあらゆるアプリで無料」としています。実行部分はドライバーに含まれ、
   このリポジトリは SDK を同梱・配布しません（公開ヘッダー（BSD-3）に合わせた定義を `stages/nvof.py` に書いています）。
-- **出力動画の形式**: 出力は mp4（映像 AV1 か VP9、音声 Opus）です。いずれも規格の推進団体が特許料を求めない方針で提供している形式で、特許のライセンス条件がある H.264 / AAC は使いません。
+- **出力動画の形式**: mp4 は H.264（NVIDIA の GPU に内蔵された NVENC で書き出し）/ AAC、mov は GoPro CineForm / PCM です。H.264 / AAC には特許のライセンス条件があります（Via LA）。作った動画の利用は利用者の責任で、条件の概要は README の「利用上の注意」にあります。CineForm は GoPro が Apache-2.0 で公開している、特許料のない形式です
 - **SMPL 系のモーキャプ**: `mocap_backend: smpl_npz` / `gvhmr` は外部で作った SMPL の結果を読みます。
   SMPL モデルとそれを使う推定器（GVHMR など）は多くが非商用ライセンスです。既定の `mediapipe` は該当しません。
 - 以前のバージョンで使っていた ProPainter（S-Lab License 1.0、非商用）は使わなくなりました。

@@ -29,7 +29,7 @@ OUT_DIR = Path(os.environ.get("VRM_REPLACE_OUT") or ROOT / "out")
 DEFAULTS = {
     "video": "", "vrm": "", "out": "", "out_auto": True,
     "preset": "quality", "joint_limits": True, "hand_interpolate": True, "fingers": True,
-    "cleanplate": True, "auto": False, "max_frames": 0, "from_stage": 0,
+    "cleanplate": True, "output_format": "mp4", "auto": False, "max_frames": 0, "from_stage": 0,
 }
 # 実行順（3 クリーンプレートは 4 レンダーの後）
 STAGES = [
@@ -136,9 +136,9 @@ class Api:
     def dialog_info(self, kind):
         """ファイル選択ダイアログの初期フォルダとファイル名（kind: video / vrm / out）"""
         if kind == "out":
-            cur = Path(self._s["out"]) if self._s.get("out") else OUT_DIR / "result.mp4"
+            cur = Path(self._s["out"]) if self._s.get("out") else OUT_DIR / ("result." + self._fmt())
             cur.parent.mkdir(parents=True, exist_ok=True)
-            return {"dir": str(cur.parent), "name": cur.name}
+            return {"dir": str(cur.parent), "name": cur.name, "ext": self._fmt()}
         cur = self._s.get(kind)
         return {"dir": str(Path(cur).parent) if cur and Path(cur).parent.exists() else str(Path.home()), "name": ""}
 
@@ -156,13 +156,18 @@ class Api:
         import webview
         d = self.dialog_info("out")
         r = self._window.create_file_dialog(webview.FileDialog.SAVE, directory=d["dir"],
-                                            save_filename=d["name"], file_types=("mp4 (*.mp4)",))
+                                            save_filename=d["name"], file_types=(f"{d['ext']} (*.{d['ext']})",))
         if r:
             self.set_output(r if isinstance(r, str) else r[0])
 
+    def _fmt(self):
+        return "mov" if self._s.get("output_format") == "mov" else "mp4"
+
     def set_output(self, p):
-        if not p.lower().endswith(".mp4"):
-            p += ".mp4"
+        q = Path(p)
+        if q.suffix.lower() in (".mp4", ".mov"):
+            q = q.with_suffix("")
+        p = str(q) + "." + self._fmt()
         with self._lock:
             self._s["out"], self._s["out_auto"] = p, False
             self._save()
@@ -193,7 +198,7 @@ class Api:
             self._files[kind], self._errors[kind] = info, err
             self._s[kind] = str(path) if info else self._s.get(kind, "")
             if kind == "video" and info and (self._s.get("out_auto", True) or not self._s.get("out")):
-                self._s["out"] = str(OUT_DIR / (Path(path).stem + "_vrm.mp4"))
+                self._s["out"] = str(OUT_DIR / (Path(path).stem + "_vrm." + self._fmt()))
                 self._s["out_auto"] = True
             if self._job["phase"] in ("done", "failed", "stopped"):
                 self._job = self._new_job("idle")
@@ -215,6 +220,9 @@ class Api:
             if key not in DEFAULTS or key in ("video", "vrm", "out", "out_auto"):
                 return
             self._s[key] = value
+            if key == "output_format" and self._s.get("out"):
+                # 出力形式に合わせて出力ファイルの拡張子を変える
+                self._s["out"] = str(Path(self._s["out"]).with_suffix("." + self._fmt()))
             self._save()
             self._bump()
 
